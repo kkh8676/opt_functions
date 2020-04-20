@@ -1,0 +1,46 @@
+{
+    "language"        : "PYTHON",
+    "main_file"       : "hartmann.py",
+    "experiment-name" : "hartmann6d",
+    "likelihood"      : "NOISELESS",
+    "acquisition"     : "PES",
+    "variables" : {
+        "x1" : {
+            "type" : "FLOAT",
+            "size" : 1,
+            "min"  : 0,
+            "max"  : 1
+        },
+        "x2" : {
+            "type" : "FLOAT",
+            "size" : 1,
+            "min"  : 0,
+            "max"  : 1
+        },
+        "x3" : {
+            "type" : "FLOAT",
+            "size" : 1,
+            "min"  : 0,
+            "max"  : 1
+        },
+        "x4" : {
+            "type" : "FLOAT",
+            "size" : 1,
+            "min"  : 0,
+            "max"  : 1
+        },
+        "x5" : {
+            "type" : "FLOAT",
+            "size" : 1,
+            "min"  : 0,
+            "max"  : 1
+        },
+        "x6" : {
+            "type" : "FLOAT",
+            "size" : 1,
+            "min"  : 0,
+            "max"  : 1
+        }
+    }
+}
+
