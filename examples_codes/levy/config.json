@@ -1,1 +1,37 @@
+{
+    "language"        : "PYTHON",
+    "main-file"       : "levy.py",
+    "experiment-name" : "levy_1",
+    "acquisition" : "PES",
+    "likelihood"      : "NOISELESS",
+    "max_finished_jobs" : 40,
+    "pes_num_x*_samples" : 10,
+    "mcmc_iters" : 1,
+    "variables" : {
+        "x1" : {
+            "type" : "FLOAT",
+            "size" : 1,
+            "min"  : -5,
+            "max"  : 5
+        },
+        "x2" : {
+            "type" : "FLOAT",
+            "size" : 1,
+            "min"  : -5,
+            "max"  : 5
+        },
+        "x3" : {
+            "type" : "FLOAT",
+            "size" : 1,
+            "min"  : -5,
+            "max"  : 5
+        },
+        "x4" : {
+            "type" : "FLOAT",
+            "size" : 1,
+            "min"  : -5,
+            "max"  : 5
+        }
+    }
+}
 
