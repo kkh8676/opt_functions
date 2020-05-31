@@ -230,6 +230,7 @@ import multiprocessing
 import importlib
 import logging
 import time
+import copy
 
 from collections import defaultdict
 
@@ -716,8 +717,8 @@ class DefaultChooser(object):
         return suggested_location, suggested_tasks
         # TODO: probably better to return suggested group, not suggested tasks... whatever.
 
-
-    def compute_acquisition_function(self, acquisition_function, grid, tasks, fast_update):
+    # Newly Coded compute_acquisition_function
+    def compute_acquisition_function_KN(self, acquisition_function, grid, tasks, fast_update):
 
         logging.info("Computing %s on grid for %s." % (self.acquisition_function_name, ', '.join(tasks)))
 
@@ -741,12 +742,48 @@ class DefaultChooser(object):
         # dealing state code is in the function_over_hypers function
         grid_acq = avg_hypers(self.models.values(), acquisition_function,
                                         grid, compute_grad=False, tasks=tasks)
+        # grid goes to PES instances's "acquisition" function as cand parameter
+        # after this code......
+        # grid_acq : sample mean of acquisition function values in the grid
+        # each sample of acquisition function value in the grid : PES instance -> stored_acq 
 
         # How can I get acquisiiton values of just one new hyperparameter??
 
         # The index and value of the top grid point
         # re-code this below codes to applicate KN algorithm
         # curretn algorithm is getting the best value in the grid and using that point as initialization of MMA method
+        # %%%%%%%%%%%%%%%%%%%%%%%%%%%% KN procedure %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+        # 1. Setup : select the parameter value η, α, δ, n0
+        # 2. Initialization : 
+        # 3. Screening
+        # 4. Stopping Rule
+
+        # %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+        # Need to select value of PCS 1 - α, IZ parameter δ. n0 >= 2
+        # n0 initialize as 5
+
+        # η = 0.5 * [ ((2 * α) / (k-1))^(-2/( n0 -1 ) - 1) ]
+        # I = {1,2,3,....,k} : candidate x
+        # 
+        alpha = 0.1
+        delta = 5
+        k = len(grid) 
+        n0 = 5
+        r = n0
+        # Initial candidate solution set I getting grid index
+        # during KN algorithm I list getting smaller and smaller......
+        # using remove function
+        # I.remove()
+        I = range(len(grid))
+        eta = 0.5 * [ ((2 * alpha) / (k-1))^(-2/( n0 -1 ) - 1) ]
+        h_square = 2 * eta * (n0-1)
+
+        sample_avg_acq = coyp.deepcopy(grid_acq)
+
+        # self.acquisition_function_instance.stored_acq can access the information of sampled acquisition function values
+
 
         # %%%%%%%%%%%%%%%%%%%%%%%%%%%% using KN algorithm part %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
@@ -767,6 +804,121 @@ class DefaultChooser(object):
         # acquisition function value at that best_acq_location
 
         # %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% using KN algorithm over %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+        sample_var_list = []
+        sampled_acq_list = []
+
+        for key in sorted(self.acquisition_function_instance.stored_acq.keys()):
+        	sampled_acq_dict = self.acquisition_function_instance.stored_acq[key]
+        	sampled_acq_list.append(sum([sampled_acq_dict[task] for task in tasks]))
+
+        for i in I:
+        	sample_vars = []
+        	for l in I :
+        		sum_of_difference_square = 0
+        		mean_sample_diff = grid_acq[i] - grid_acq[l]
+        		for j in range(n0):
+        			sample_diff = sampled_acq_list[j][i] - sampled_acq_list[j][l]
+        			
+        			sum_of_difference_square += (sample_diff - mean_sample_diff)**2
+
+        		sample_var = (1/(n0-1)) * sum_of_difference_square
+        		sample_vars.append(sample_var)
+        	sample_var_list.append(sample_vars)
+
+        # solution i and solution j sample variance sample_var_list[i][j]
+
+
+        while(True):
+
+        	# Screening process
+
+        	for i in I:
+        		for l in I:
+        			W = max(0, (delta / (2*r)) * (((h_square * sample_var_list[i][l])/ (delta**2))-r))
+        			screen_cond = (sample_avg_acq[i] < sample_avg_acq[l] - W)
+        			if(screen_cond):
+        				I.remove(i)
+        				break
+
+        	if(len(I)==1):
+        		break
+
+        	# Sample another hyperparameter 
+        	# for j = 1.......Mj do..........
+
+        	# Sampling another hyperparameter of each models process
+        	for task_name, task in tasks.iteritems():
+        		gp_instance_task = self.models[task_name]
+
+        		inputs = gp_instance_task._inputs
+        		values = gp_instance_task._values
+
+        		# pending?
+        		gp_instance_task.fit_another(inputs, values)
+
+        	# perform EP and X star sampling in current state
+        	# performEPandXstarSamplingForOneState(self, obj_model, con_models_dict, fast,
+        	# num_random_features, x_star_tolerance, num_x_star_samples)
+        	acquisition_function_instance.performEPandXstarSamplingForOneState(self.objective_model_dict.values[0],
+        		self.constraint_models_dict,fast_update,
+        		num_random_features = self.options['pes_num_rand_features'],
+        		x_star_tolerance = self.options['pes_opt_x*_tol'],
+        		num_x_star_samples = self.options['pes_num_x*_samples'] )
+
+        	# compute acquisition function of current state
+
+        	# Same with PES.py "acquisition" function
+
+        	inputs_hash = hash(grid.tostring())
+
+        	cache_key = (inputs_hash, self.objective_model_dict.values()[0].state)
+
+        	if cache_key in self.acquisition_function_instance.stored_acq:
+        		return sum([self.acquisition_function_instance.stored_acq[cache_key][task] for task in tasks])
+
+        	if len({model.state for model in models}) != 1:
+        		raise Exception("Models are not all at the same state")
+        	#assert not compute_grad
+
+        	N_cand = grid.shape[0]
+
+        	x_stars = self.cached_x_star[self.acquisition_function_instance.objective_model_dict.values()[0].state]
+        	ep_sols = self.cahced_EP_solutions[self.acquisition_function_instance.objective_model_dict.values()[0].state]
+
+        	temp_acq_dict = defaultdict(lambda : np.zeros(N_cand))
+
+        	for i in xrange(self.options['pes_num_x*_samples']):
+
+        		if x_stars[i] is None:
+        			continue
+
+        		for t,val in evaluate_acquisition_function_given_EP_solution(self.objective_model_dict,self.constraint_models_dict, grid, ep_sols[i],x_stars[i]).iteritems():
+        			temp_acq_dict[t] += val
+
+        	for t in temp_acq_dict:
+        		temp_acq_dict[t] = temp_acq_dict[t] / float(self.options['pes_num_x*_samples'])
+
+        	self.stored_acq[cache_key] = temp_acq_dict
+
+        	if tasks in None:
+        		tasks = temp_acq_dict.keys()
+
+        	newly_sampled_acq = sum([temp_acq_dict[task] for task in tasks])
+
+        	# sample_avg_acq
+        	# newly_sampled_acq
+
+        	sample_avg_acq = list(map(lambda x,y: (r*x + y)/(r+1),sample_avg_acq,newly_sampled_acq))
+
+        	r += 1
+            
+        # while loop end
+
+        best_acq_ind = I[0]
+        best_acq_location = grid[best_acq_ind]
+        best_acq_value = sample_avg_acq[best_acq_ind]
+
         return {"location" : best_acq_location, "value" : best_acq_value}
 
     @property
