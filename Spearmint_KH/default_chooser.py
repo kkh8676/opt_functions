@@ -191,6 +191,7 @@ import multiprocessing
 import importlib
 import logging
 import time
+import copy
 
 from collections import defaultdict
 
@@ -204,6 +205,7 @@ from spearmint                       import models
 from spearmint                       import acquisition_functions
 from spearmint.acquisition_functions.constraints_helper_functions import constraint_confidence_over_hypers, total_constraint_confidence_over_hypers
 from spearmint.utils.parsing         import GP_OPTION_DEFAULTS
+from spearmint.acquisition_functions import predictive_entropy_search as pes
 
 
 
@@ -285,9 +287,7 @@ class DefaultChooser(object):
         # Reset these if you are refitting. The reason is that in suggest(), to save time,
         # it checks if there is anything stored here in case best() was already
         # called explicity. So, we need to make sure best is called again if needed!
-        
-        # task means coupled set i think.....
-        # task = objective + constraints? just?
+
         for task_name, task in tasks.iteritems():
             if task.type.lower() == 'objective':
                 self.objective = task
@@ -295,9 +295,7 @@ class DefaultChooser(object):
                 self.constraints[task_name] = task
             else:
                 raise Exception('Unknown task type.')
-        
-        # Getting "fit" function parameter hypers
-        # if it is not given, just assign a defaultdict for it
+
         hypers = hypers if hypers is not None else defaultdict(dict)
 
         # Find the total number of samples across tasks, and do not fit if less than self.options['initial design size']
@@ -308,9 +306,7 @@ class DefaultChooser(object):
 
         # FAST/SLOW updates
         fit_hypers = True
-        
-        # fast update version
-        # No need to understand..........
+
         if self.options['fast_updates']:
             # if elapsed time since last slow update < duration OF last slow update, do fast update
             elapsed_time_since_last_slow_update = time.time() - self.end_time_of_last_slow_update
@@ -326,8 +322,7 @@ class DefaultChooser(object):
                 self.start_time_of_last_slow_update = time.time()
         else:
             self.start_time_of_last_slow_update = time.time() # for scale-duration
-        
-        # fitting each objective and constraint
+
         for task_name, task in tasks.iteritems():
             inputs  = task.valid_normalized_inputs(self.input_space)
 
@@ -376,7 +371,6 @@ class DefaultChooser(object):
                     pass
                 else:
                     logging.debug('Adding pending samples to %s for %s task' % (model_class_name, task_name)) # debug only
-                    # Fitting the model hyperparameter here.........
                     self.models[task_name].fit(inputs, values, pending=pending, fit_hypers=False)
 
                 # hypers are unchanged
@@ -494,8 +488,10 @@ class DefaultChooser(object):
             # when you have multiple cores -- cool. this was probably weird on the 3 core thing
             suggestion = sobol_grid.generate(self.num_dims, grid_size=100, grid_seed=total_pending)[0]
             # above: for some reason you can't generate a grid of size 1. heh.
+            
 
             suggestion = self.input_space.from_unit(suggestion) # convert to original space
+
 
             logging.info("\nSuggestion:     ")
             self.input_space.paramify_and_print(suggestion.flatten(), left_indent=16)
@@ -504,10 +500,12 @@ class DefaultChooser(object):
                 # normally it doesn't really matter, but in the decoupled case
                 # with PESC in particlar, if there are no objective data it skips
                 # the EP and gets all messed up
-                return suggestion, [self.objective.name]
+
+                # found it!!
+                return suggestion, [self.objective.name], 1, defaultdict(list), defaultdict(list), defaultdict(list)
                 # return suggestion, [random.choice(task_names)]
             else:  # if not decoupled. this is a bit of a hack but w/e
-                return suggestion, task_names
+                return suggestion, task_names, 1, defaultdict(list), defaultdict(list), defaultdict(list)
 
         fast_update = False
         if self.options['fast_updates']:
@@ -533,6 +531,7 @@ class DefaultChooser(object):
         # Create the grid of optimization initializers
         acq_grid = self.generate_grid(self.options['fast_acq_grid_size'] if fast_update else self.options['acq_grid_size'])
 
+        
         # initialize/create the acquisition function
         logging.info("Initializing %s" % self.acquisition_function_name)
         acquisition_function = self.acquisition_function_instance.create_acquisition_function(\
@@ -542,6 +541,8 @@ class DefaultChooser(object):
             x_star_grid_size=self.options['pes_x*_grid_size'], 
             x_star_tolerance=self.options['pes_opt_x*_tol'],
             num_x_star_samples=self.options['pes_num_x*_samples'])
+
+
 
         # flip the data structure of task couplings
         task_groups = defaultdict(list)
@@ -554,17 +555,11 @@ class DefaultChooser(object):
         # the dict for tasks and the summing could happen out here, but that's ok
         # since not all acquisition functions might be able to do that
 
-        # compute_acquisition_function refers above 'acquisition function' (one instance)
-        # and 
-        # deal with hyperparameters with function_over_hypers 
-        # compute_acquisition_function returns dictionary which constains the information of 
-        # best_acq_location and best_
         task_acqs = dict()
         for group, task_group in task_groups.iteritems():
             task_acqs[group] = self.compute_acquisition_function(acquisition_function, acq_grid, task_group, fast_update)
         # Now task_acqs is a dict, with keys being the arbitrary group index, and the values
         # being a dict with keys "location" and "value"
-
 
         # normalize things by the costs
         group_costs = dict()
@@ -655,13 +650,16 @@ class DefaultChooser(object):
         best_acq_value     = task_acqs[best_group]["value"]
         suggested_tasks    = task_groups[best_group]
 
+        #logging.info("suggested location is %s"%str(suggested_location))
+        #logging.info("best_acq_value is %s"%str(best_acq_value))
+
         # Make sure we didn't do anything weird with the bounds
         suggested_location[suggested_location > 1] = 1.0
         suggested_location[suggested_location < 0] = 0.0
 
         suggested_location = self.input_space.from_unit(suggested_location)
 
-        logging.info("\nSuggestion: task(s) %s at location" % ",".join(suggested_tasks))
+        logging.info("\nSuggestion: task(s) %s at location with acq_value %s" %(",".join(suggested_tasks),str(best_acq_value)))
         self.input_space.paramify_and_print(suggested_location.flatten(), left_indent=16)
 
         if not fast_update:
@@ -671,7 +669,12 @@ class DefaultChooser(object):
             self.end_time_of_last_fast_update = time.time()
             self.duration_of_last_fast_update = time.time() - self.start_time_of_last_fast_update
 
-        return suggested_location, suggested_tasks
+        returning_x_star_samples = self.acquisition_function_instance.cached_x_star
+        returning_cond_Vars = self.acquisition_function_instance.cached_conditioned_Variances
+        returning_uncond_Vars = self.acquisition_function_instance.cached_unconditioned_Variances
+        #logging.info(returning_x_star_samples)
+        #logging.info(self.input_space.paramify(suggested_location))
+        return suggested_location, suggested_tasks, best_acq_value, self.acquisition_function_instance.cached_x_star, self.acquisition_function_instance.cached_unconditioned_Variances, self.acquisition_function_instance.cached_conditioned_Variances
         # TODO: probably better to return suggested group, not suggested tasks... whatever.
 
 
@@ -692,19 +695,21 @@ class DefaultChooser(object):
         avg_hypers = function_over_hypers
 
         # Compute the acquisition function on the grid
-        # self.models.values() returns model instances...... GP models of objective and constraints
-        # by using avg_hypers averaging acquisition function values of each hyperparameter
-        # dealing state code is in the function_over_hypers function
+
         grid_acq = avg_hypers(self.models.values(), acquisition_function,
                                         grid, compute_grad=False, tasks=tasks)
 
+               
+
+        logging.info("in compute acquisition function grid acq size is %d"%len(grid_acq))
+
         # The index and value of the top grid point
-        # re-Code this below codes to applicate KN algorithm
-        # current algorithm is getting the best value in the grid and using that point as initialization of MMA method
-        
+        # I think this best_acq_location variable goes to evaluate_acquisition_function is PES as cand
         best_acq_ind = np.argmax(grid_acq)
         best_acq_location = grid[best_acq_ind]
         best_grid_acq_value  = np.max(grid_acq)
+
+        
 
         has_grads = self.acquisition_function_instance.has_gradients
 
@@ -745,18 +750,18 @@ class DefaultChooser(object):
 
                 x_opt = opt.optimize(best_acq_location.copy())
 
+
                 returncode = opt.last_optimize_result()
                 # y_opt = opt.last_optimum_value()
                 y_opt = f(x_opt, np.array([]))
-
                 # overwrite the current best if optimization succeeded
                 if (returncode > 0 or returncode==-4) and y_opt > best_grid_acq_value:
                     print_nlopt_returncode(returncode, logging.debug)
-
                     best_acq_location = x_opt
                     best_acq_value = y_opt
                 else:
                     best_acq_value = best_grid_acq_value
+
 
             else: # use bfgs
                 # see http://docs.scipy.org/doc/scipy-0.14.0/reference/generated/scipy.optimize.fmin_l_bfgs_b.html
@@ -800,6 +805,230 @@ class DefaultChooser(object):
         else:
             # do not optimize the acqusition function
             logging.debug('Best %s on grid: %f' % (self.acquisition_function_name, best_grid_acq_value))
+
+
+        logging.info(best_acq_value)
+        return {"location" : best_acq_location, "value" : best_acq_value}
+
+    # Newly Coded compute_acquisition_function
+    def compute_acquisition_function_KN(self, acquisition_function, grid, tasks, fast_update):
+
+        logging.info("Computing %s on grid for %s." % (self.acquisition_function_name, ', '.join(tasks)))
+
+
+        # Special case -- later generalize this to more complicated cases
+        # If there is only one task here, and it depends on only a subset of the parameters
+        # then let's do the optimization in lower dimensional space... right?
+        # i wonder though, will the acquisition function actually have 0 gradients in those
+        # directions...? maybe not. but they are irrelevant. but will they affect the optimization?
+        # hmm-- seems not worth the trouble here...
+
+        # if we are doing a fast update, just use one of the hyperparameter samples
+        # avg_hypers = function_over_hypers if not fast_update else function_over_hypers_single
+        # Using model.state number of hyperparameter and averaging it
+        # just name assigning process here
+        avg_hypers = function_over_hypers
+
+        # Compute the acquisition function on the grid
+        # self.models.values() returns model instances...... GP models of objective and constraints
+        # by using avg_hypers averaging acquisition function values of each hyperparameter
+        # dealing state code is in the function_over_hypers function
+        grid_acq = avg_hypers(self.models.values(), acquisition_function,
+                                        grid, compute_grad=False, tasks=tasks)
+        # grid goes to PES instances's "acquisition" function as cand parameter
+        # after this code......
+        # grid_acq : sample mean of acquisition function values in the grid
+        # each sample of acquisition function value in the grid : PES instance -> stored_acq 
+
+        # How can I get acquisiiton values of just one new hyperparameter??
+
+        # The index and value of the top grid point
+        # re-code this below codes to applicate KN algorithm
+        # curretn algorithm is getting the best value in the grid and using that point as initialization of MMA method
+        # %%%%%%%%%%%%%%%%%%%%%%%%%%%% KN procedure %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+        # 1. Setup : select the parameter value η, α, δ, n0
+        # 2. Initialization : 
+        # 3. Screening
+        # 4. Stopping Rule
+
+        # %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+        # Need to select value of PCS 1 - α, IZ parameter δ. n0 >= 2
+        # n0 initialize as 5
+
+        # η = 0.5 * [ ((2 * α) / (k-1))^(-2/( n0 -1 ) - 1) ]
+        # I = {1,2,3,....,k} : candidate x
+        # 
+        alpha = 0.1
+        delta = 5
+        k = len(grid) 
+        n0 = 5
+        r = n0
+        # Initial candidate solution set I getting grid index
+        # during KN algorithm I list getting smaller and smaller......
+        # using remove function
+        # I.remove()
+        I = range(len(grid))
+        eta = 0.5 * ( ((2 * alpha) / (k-1))**(-2/( n0 -1 ) - 1) )
+        h_square = 2 * eta * (n0-1)
+
+        sample_avg_acq = copy.deepcopy(grid_acq)
+
+        # self.acquisition_function_instance.stored_acq can access the information of sampled acquisition function values
+
+
+        # %%%%%%%%%%%%%%%%%%%%%%%%%%%% using KN algorithm part %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+
+        # while(True)
+        #    I = result of procedure KN
+        #    if (stopping condition is satisfied, |I| ==1 ) break
+        #  
+        #    Sample another hyperparameter ϕ^new
+        #    for j = 1,2...,Mj do
+        #        Sample f^new ~ p(f|Dn. φ^j, ϕ^new)
+        #        set x_star^new,j = argmin f^newj(x)
+        #        perform EP and get a sample of acquisition fcuntion value A_newj = 0.5......
+        #        Abar = 
+        # 
+        # breaking the while loop
+        # best_acq_location = Xn = I
+        # acquisition function value at that best_acq_location
+
+        # %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% using KN algorithm over %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+        sample_var_list = []
+        sampled_acq_list = []
+
+        for key in sorted(self.acquisition_function_instance.stored_acq.keys()):
+        	sampled_acq_dict = self.acquisition_function_instance.stored_acq[key]
+        	sampled_acq_list.append(sum([sampled_acq_dict[task] for task in tasks]))
+
+
+        # This process is a bottleneck i think.......
+        
+        
+
+        logging.info("Bottleneck process is started!!")
+
+        for i in I:
+        	sample_vars = []
+        	if (i%1000 == 0):
+        		logging.info("%d th variances are being computed!!"%i)
+        	for l in I :
+        		sum_of_difference_square = 0
+        		mean_sample_diff = grid_acq[i] - grid_acq[l]
+        		for j in range(n0):
+        			sample_diff = sampled_acq_list[j][i] - sampled_acq_list[j][l]
+        			
+        			sum_of_difference_square += (sample_diff - mean_sample_diff)**2
+
+        		sample_var = (1/(n0-1)) * sum_of_difference_square
+        		sample_vars.append(sample_var)
+        	sample_var_list.append(sample_vars)
+
+        # solution i and solution j sample variance sample_var_list[i][j]
+        logging.info("Bottleneck process is done!!")
+
+
+        while(True):
+
+        	# Screening process
+
+        	for i in I:
+        		for l in I:
+        			W = max(0, (delta / (2*r)) * (((h_square * sample_var_list[i][l])/ (delta**2))-r))
+        			screen_cond = (sample_avg_acq[i] < sample_avg_acq[l] - W)
+        			if(screen_cond):
+        				I.remove(i)
+        				break
+
+        	if(len(I)==1):
+        		break
+
+        	logging.info("Current candidate solution set size is %d"%len(I))
+        	logging.info("Sampled %d hyperparameter"%r)
+
+        	# Sample another hyperparameter 
+        	# for j = 1.......Mj do..........
+
+        	# Sampling another hyperparameter of each models process
+
+        	for task_name in tasks:
+        		gp_instance_task = self.models[task_name]
+
+        		inputs = gp_instance_task._inputs
+        		values = gp_instance_task._values
+
+        		# pending?
+        		gp_instance_task.fit_another(inputs, values)
+
+        	# perform EP and X star sampling in current state
+        	# performEPandXstarSamplingForOneState(self, obj_model, con_models_dict, fast,
+        	# num_random_features, x_star_tolerance, num_x_star_samples)
+        	
+        	performEPandXStarSampling = self.acquisition_function_instance.performEPandXstarSamplingForOneState
+        	performEPandXStarSampling(self.objective_model_dict.values()[0],
+        		self.constraint_models_dict, fast_update,
+        		num_random_features = self.options['pes_num_rand_features'],
+        		x_star_tolerance = self.options['pes_opt_x*_tol'],
+        		num_x_star_samples = self.options['pes_num_x*_samples'] )
+
+        	# compute acquisition function of current state
+
+        	# Same with PES.py "acquisition" function
+
+        	inputs_hash = hash(grid.tostring())
+
+        	cache_key = (inputs_hash, self.objective_model_dict.values()[0].state)
+
+        	if cache_key in self.acquisition_function_instance.stored_acq:
+        		return sum([self.acquisition_function_instance.stored_acq[cache_key][task] for task in tasks])
+
+        	#if len({model.state for model in models}) != 1:
+        	#	raise Exception("Models are not all at the same state")
+        	#assert not compute_grad
+
+        	N_cand = grid.shape[0]
+
+        	x_stars = self.acquisition_function_instance.cached_x_star[self.objective_model_dict.values()[0].state]
+        	ep_sols = self.acquisition_function_instance.cached_EP_solutions[self.objective_model_dict.values()[0].state]
+
+        	temp_acq_dict = defaultdict(lambda : np.zeros(N_cand))
+
+        	for i in xrange(self.options['pes_num_x*_samples']):
+
+        		if x_stars[i] is None:
+        			continue
+
+        		returned_acq , returned_uncon_Var, returned_con_Var = pes.evaluate_acquisition_function_given_EP_solution(self.objective_model_dict,self.constraint_models_dict, grid, ep_sols[i],x_stars[i])
+
+        		for t,val in returned_acq.iteritems():
+        			temp_acq_dict[t] += val
+
+        	for t in temp_acq_dict:
+        		temp_acq_dict[t] = temp_acq_dict[t] / float(self.options['pes_num_x*_samples'])
+
+        	self.acquisition_function_instance.stored_acq[cache_key] = temp_acq_dict
+
+        	if tasks is None:
+        		tasks = temp_acq_dict.keys()
+
+        	newly_sampled_acq = sum([temp_acq_dict[task] for task in tasks])
+
+        	# sample_avg_acq
+        	# newly_sampled_acq
+
+        	sample_avg_acq = list(map(lambda x,y: (r*x + y)/(r+1),sample_avg_acq,newly_sampled_acq))
+
+        	r += 1
+            
+        # while loop end
+
+        best_acq_ind = I[0]
+        best_acq_location = grid[best_acq_ind]
+        best_acq_value = sample_avg_acq[best_acq_ind]
 
         return {"location" : best_acq_location, "value" : best_acq_value}
 
