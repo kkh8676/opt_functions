@@ -875,8 +875,8 @@ class DefaultChooser(object):
 
 
         copied = copy.deepcopy(acq_candidates)
-        # Sorting the copied array
-        copied.sort()
+        # Sorting the copied array in descending order....
+        copied.sort(reverse=True)
 
         # Constructing elite_set
         elite_set = []
@@ -937,7 +937,9 @@ class DefaultChooser(object):
                     break
 
             candidates = np.array(candidates)
-            # Simulate N replications........
+
+
+            # fitting N number of hyperparameter......
             for i in range(N):
 
                 for task_name in tasks:
@@ -949,44 +951,39 @@ class DefaultChooser(object):
                     gp_instance_task.fit_another(inputs,values)
 
 
-                # perform EP and X star sampling in current state
-                self.acquisition_function_instance.performEPandXstarSamplingForOneState(self.objective_model_dict.values()[0],
-                                                             self.constraint_models_dict, fast_update,
-                                                             num_random_features = self.options["pes_num_rand_features"],
-                                                             x_star_tolerance = self.options["pes_opt_x*_tol"],
-                                                             num_x_star_samples = self.options["pes_num_x*_samples"])
+            # Getting new acquisition functions....... 
+
+            new_acquisition_function = self.acquisition_function_instance.create_acquisition_function(\
+                self.objective_model_dict, self.constraint_models_dict,
+                fast=fast_update, grid=acq_grid, current_best=current_best_value,
+                num_random_features=self.options['pes_num_rand_features'],
+                x_star_grid_size=self.options['pes_x*_grid_size'], 
+                x_star_tolerance=self.options['pes_opt_x*_tol'],
+                num_x_star_samples=self.options['pes_num_x*_samples'])
+
+            new_acq_candidates = avg_hypers(self.models.values(), new_acquisition_function,
+                                             candidates, compute_grad = False, tasks = tasks)
+
+            copied = copy.deepcopy(new_acq_candidates)
+            # Sorting the array in descending order
+            copied.sort(reverse = True)
+
+            # We have used Simulation Budget....
+            sum_T = sum_T + N*k
+            # Constructing elite set 
+            elite_set = []
+
+            for i in range(m):
+                origin_index = np.where(new_acq_candidates == copied[m])[0][0]
+                elite_set.append(candidates[origin_index])
+
+            # End of while loop
+            # End of CE algorithm
 
 
-                # compute acquisition function of current state
-
-                inputs_hash = hash(candidates.tostring())
-
-                cache_key = (inputs_hash, self.objective_model_dict.values()[0].state)
-
-                if cache_key in self.acquisition_function_instance.stored_acq:
-                    return sum([self.acquisition_function_instance.stored_acq[cache_key][task] for task in tasks])
-
-                N_cand = np.array(candidates).shape[0]
-
-                x_stars = self.acquisition_function_instance.cached_x_star[self.objective_model_dict.values()[0].state]
-                ep_sols = self.acquisition_function_instance.cached_EP_solutions[self.objective_model_dict.values()[0].state]
-
-                temp_acq_dict = defaultdict(lambda : np.zeros(N_cand))
-
-                for j in xrange(self.options["pes_num_x*_samples"]):
-
-                    if x_stars[i] is None:
-                        continue
-
-                    for t,val in pes.evaluate_acquisition_function_given_EP_solution(self.objective_model_dict,self.constraint_models_dict, np.array(candidates), ep_sols[i], x_stars[i]).iteritems():
-                        temp_acq_dict[t] += val
-
-
-                for t in temp_acq_dict:
-                    temp_acq_dict[t] = temp_acq_dict[t] / float(sel)
-
-
-
+        # reporting 'mean' as the best_acq_location
+        logging.info(mean)
+        best_acq_value = avg_hypers(self.model.values(), acquisition_function, mean, compute_grad = False, tasks = tasks)
         return
 
     @property
