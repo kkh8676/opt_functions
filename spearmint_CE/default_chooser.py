@@ -549,7 +549,7 @@ class DefaultChooser(object):
         # since not all acquisition functions might be able to do that
         task_acqs = dict()
         for group, task_group in task_groups.iteritems():
-            task_acqs[group] = self.compute_acquisition_function_CE(acquisition_function, acq_grid, task_group, fast_update)
+            task_acqs[group] = self.compute_acquisition_function_CE_ver2(acquisition_function, acq_grid, task_group, fast_update)
         # Now task_acqs is a dict, with keys being the arbitrary group index, and the values
         # being a dict with keys "location" and "value"
 
@@ -848,9 +848,10 @@ class DefaultChooser(object):
 
         # first generating grid......
         logging.info("Generating candidates......")
+        generated_num = 0
         while(True):
             x = np.random.multivariate_normal(init_mean,init_cov)
-
+            generated_num = generated_num + 1
             out_range = False
             for i in range(self.num_dims):
                 if(x[i] < 0 or x[i] >1):
@@ -863,6 +864,7 @@ class DefaultChooser(object):
             candidates.append(x)
 
             if(len(candidates) >= k):
+                logging.info("we generated %d number of candidates using %d samples"%(k,generated_num))
                 break
 
         # first solution set candidates is ready!
@@ -889,7 +891,9 @@ class DefaultChooser(object):
         while(True):
             logging.info("Updating process is being processed!!")
             logging.info("Simul total Budget is %d but right now is %d"%(total_Simul_Budget,sum_T))
-            logging.info(self.models.values()[0].num_states)
+            #logging.info(self.models.values()[0].num_states)
+            #logging.info(self.models.values()[0])
+            #logging.info(self.obj_model)
 
             mean = np.mean(elite_set, axis = 0)
 
@@ -906,7 +910,7 @@ class DefaultChooser(object):
             prev_threshold = threshold
             threshold = (copied[m] + copied[m-1])/2
 
-            stopping_criteria = (sum_T >= total_Simul_Budget) or self.models.values()[0].num_states >= 50
+            stopping_criteria = (sum_T >= total_Simul_Budget) or self.models.values()[0].num_states >= 75
 
             if(stopping_criteria):
                 break
@@ -922,8 +926,10 @@ class DefaultChooser(object):
             # Generation and Simulation process
             # First, Generate candidate process
             candidates = []
+            generated_num = 0
             while(True):
                 x = np.random.multivariate_normal(mean,cov_mat)
+                generated_num = generated_num + 1
 
                 out_range = False
                 for i in range(self.num_dims):
@@ -937,6 +943,7 @@ class DefaultChooser(object):
                 candidates.append(x)
 
                 if(len(candidates) >= k):
+                    logging.info("we generated %d number of candidates using %d samples"%(k,generated_num))
                     break
 
             candidates = np.array(candidates)
@@ -953,7 +960,7 @@ class DefaultChooser(object):
 
                     gp_instance_task.fit_another(inputs,values)
 
-
+            logging.info("Fitting N hyperparameters take most times?")
             # Getting new acquisition functions....... 
 
             # I think current best values is not used in PES
@@ -973,6 +980,7 @@ class DefaultChooser(object):
                 x_star_tolerance=self.options['pes_opt_x*_tol'],
                 num_x_star_samples=self.options['pes_num_x*_samples'])
 
+            logging.info("Creating acquisition functions?")
             new_acq_candidates = avg_hypers(self.models.values(), new_acquisition_function,
                                              candidates, compute_grad = False, tasks = tasks)
 
@@ -998,6 +1006,241 @@ class DefaultChooser(object):
         
         best_acq_value = avg_hypers(self.models.values(), acquisition_function, mean, compute_grad = False, tasks = tasks)[0]
         logging.info(best_acq_value)
+        logging.info("in the compute acquisition function CE model num of state is %d"%self.obj_model.num_states)
+        return {"location" : mean, "value": best_acq_value}
+
+
+# 20.07.18
+# first covariance matrix element has changed to 1
+# making covariance matrix has been updated
+# fitting N more hyperparameter process has been changed
+# I think the process will alleviate the time in creating acquisition function 
+    def compute_acquisition_function_CE_ver2(self, acquisition_function, grid, tasks, fast_update):
+
+        # At first, we have only Mk ep sols and x_stars
+        # if wanna get another sample of hyperparameter, should compute the x_stars and EP sols
+        # using performEPandgettingXstar method,,,,,,,,,,
+
+        logging.info("Computing %s using Cross Entropy for %s. "%(self.acquisition_function_name, ', '.join(tasks) ))
+
+        avg_hypers = function_over_hypers
+
+        # %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% CE algorithm %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+        # 1. Initialize : sample Mk hyperparameter and GP model fitting already done........
+        #                : Initialize pdf p(-,v1)
+        #                : i=1
+        #                : in this framework, there are already Mk samples of acquisition function
+        #                : So we can update the parameter by using it........
+        #    while( stopping criteria is not satisfied):
+        #        2. Generation : randomly generate a set of solutions X1,X2,.....,X_kt from pdf p(-.v_t)
+        #        3. Simulation : simulate Ni replications for each Xi to get objective function
+        #                       : that is, fitting Ni hyperparameter for GP model
+        #                       : Get acquisition function values from that GP model
+        #                       : Compute sample averaged acquisition function value
+        #        4. Update     : Update pdf parameter v_hat_t+1
+        #                       : from equation ; v_hat........
+        #
+        # %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+        # Initializing parameters
+        t = 1
+        k = 500
+        T = 2500
+        m = int(k * 0.1)
+        alpha = 0.5
+        N = int(T/k)
+        sum_T = N*k
+        total_sampled_hyper = self.obj_model.num_states
+
+        threshold = None
+        v = None
+
+        total_Simul_Budget = 25e4
+
+        # n dimension vector generating 
+        init_mean = []
+        for i in range(self.num_dims):
+            init_mean.append(0.5)
+
+        init_cov = []
+        for i in range(self.num_dims):
+            temp_vec = []
+            for j in range(self.num_dims):
+                if(i==j):
+                    temp_vec.append(1)
+                    continue
+                temp_vec.append(0)
+            init_cov.append(temp_vec)
+
+        candidates = []
+
+        # first generating grid......
+        logging.info("Generating candidates......")
+        generated_num = 0
+        while(True):
+            x = np.random.multivariate_normal(init_mean,init_cov)
+            generated_num = generated_num + 1
+            out_range = False
+            for i in range(self.num_dims):
+                if(x[i] < 0 or x[i] >1):
+                    out_range = True
+                    break
+
+            if(out_range):
+                continue
+
+            candidates.append(x)
+
+            if(len(candidates) >= k):
+                logging.info("we generated %d number of candidates using %d samples"%(k,generated_num))
+                break
+
+        # first solution set candidates is ready!
+
+        candidates = np.array(candidates)
+        
+        # getting sample averaged acquisition function values.......
+        acq_candidates = avg_hypers(self.models.values(), acquisition_function,
+                                             candidates, compute_grad = False, tasks = tasks)
+
+
+        copied = copy.deepcopy(acq_candidates)
+        # Sorting the copied array in descending order....
+        #logging.info(type(copied))
+        copied = np.sort(copied)[::-1]
+
+        # Constructing elite_set
+        elite_set = []
+        for i in range(m):
+            origin_index = np.where(acq_candidates == copied[i])[0][0]
+            #logging.info(origin_index)
+            elite_set.append(candidates[origin_index])
+
+        while(True):
+            #logging.info("Updating process is being processed!!")
+            #logging.info("Simul total Budget is %d but right now is %d and sampled %d number of hypers"%(total_Simul_Budget,sum_T,total_sampled_hyper))
+            #logging.info(self.models.values()[0].num_states)
+            #logging.info(self.models.values()[0])
+            #logging.info(self.obj_model)
+
+            mean = np.mean(elite_set, axis = 0)
+
+            zero_vec = np.reshape(np.zeros(self.num_dims), (self.num_dims,1))
+            cov_mat  = np.matrix(np.matmul(zero_vec,zero_vec.T))
+
+            for item in elite_set:
+                dist = np.subtract(item, mean)
+                cov_mat = cov_mat + np.matrix(np.matmul(np.reshape(dist,(self.num_dims,1)),np.reshape(dist,(self.num_dims,1)).T ))
+
+            cov_mat = cov_mat / m
+
+            prev_v = v
+            v = (mean,cov_mat)
+            prev_threshold = threshold
+            threshold = (copied[m] + copied[m-1])/2
+
+            stopping_criteria = (sum_T >= total_Simul_Budget) or total_sampled_hyper >= 200
+
+            if(stopping_criteria):
+                break
+
+
+            k = int(1.04 * k)
+            T = int(1.1 * T) 
+            m = int(0.1 * k)
+            N = int(T/k)
+            total_sampled_hyper = total_sampled_hyper + N
+            # Updating process is done
+
+            # Generation and Simulation process
+            # First, Generate candidate process
+            candidates = []
+            generated_num = 0
+            while(True):
+                x = np.random.multivariate_normal(mean,cov_mat)
+                generated_num = generated_num + 1
+
+                out_range = False
+                for i in range(self.num_dims):
+                    if(x[i] < 0 or x[i] >1):
+                        out_range = True
+                        break
+
+                if(out_range):
+                    continue
+
+                candidates.append(x)
+
+                if(len(candidates) >= k):
+                    #logging.info("we generated %d number of candidates using %d samples"%(k,generated_num))
+                    break
+
+            candidates = np.array(candidates)
+
+
+            # fitting N number of hyperparameter......
+
+            self.obj_model.options['mcmc_iters'] = N
+            for task_name in tasks:
+                gp_instance_task = self.models[task_name]
+                gp_instance_task.options['mcmc_iters']  = N
+
+                inputs = gp_instance_task._inputs
+                values = gp_instance_task._values
+
+                gp_instance_task.fit(inputs,values)
+                #logging.info(gp_instance_task.num_states)
+
+            # N more fitting hyperparameters need to be coded in the above section........
+
+            
+            # Getting new acquisition functions....... 
+
+            # I think current best values is not used in PES
+            # So it is ok with None value but .........TODO
+            if self.options['recommendations'] == "during":
+                current_best_value = self.stored_recommendation['model_model_value']
+                if current_best_value is not None:
+                    current_best_value = self.objective.standardize_variance(self.objective.standardize_mean(current_best_value))
+            else:
+                current_best_value = None
+
+            new_acquisition_function = self.acquisition_function_instance.create_acquisition_function(\
+                self.objective_model_dict, self.constraint_models_dict,
+                fast=fast_update, grid=candidates, current_best=current_best_value,
+                num_random_features=self.options['pes_num_rand_features'],
+                x_star_grid_size=self.options['pes_x*_grid_size'], 
+                x_star_tolerance=self.options['pes_opt_x*_tol'],
+                num_x_star_samples=self.options['pes_num_x*_samples'])
+
+            
+            new_acq_candidates = avg_hypers(self.models.values(), new_acquisition_function,
+                                             candidates, compute_grad = False, tasks = tasks)
+
+            copied = copy.deepcopy(new_acq_candidates)
+            # Sorting the array in descending order
+            copied = np.sort(copied)[::-1]
+
+            # We have used Simulation Budget....
+            sum_T = sum_T + N*k
+            # Constructing elite set 
+            elite_set = []
+
+            for i in range(m):
+                origin_index = np.where(new_acq_candidates == copied[m])[0][0]
+                elite_set.append(candidates[origin_index])
+
+            # End of while loop
+            # End of CE algorithm
+
+
+        # reporting 'mean' as the best_acq_location
+        logging.info(mean)
+        
+        best_acq_value = avg_hypers(self.models.values(), acquisition_function, mean, compute_grad = False, tasks = tasks)[0]
+        logging.info(best_acq_value)
+        logging.info("in the compute acquisition function CE model num of state is %d"%self.obj_model.num_states)
         return {"location" : mean, "value": best_acq_value}
 
     @property
@@ -1057,6 +1300,7 @@ class DefaultChooser(object):
 
         elif self.numConstraints() == 0:
             logging.info('Computing current best...')
+            logging.info(self.obj_model.num_states)
             
             rec_grid = self.generate_grid(self.options['rec_grid_size'])
 
@@ -1126,6 +1370,8 @@ class DefaultChooser(object):
 
         # Compute the GP mean
         obj_mean, obj_var = obj_model.function_over_hypers(obj_model.predict, grid)
+        logging.info(obj_model)
+        logging.info(obj_model.num_states)
 
         # find the min and argmin of the GP mean
         current_best_location = grid[np.argmin(obj_mean),:]
