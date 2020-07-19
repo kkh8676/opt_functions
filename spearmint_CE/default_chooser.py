@@ -1243,6 +1243,198 @@ class DefaultChooser(object):
         logging.info("in the compute acquisition function CE model num of state is %d"%self.obj_model.num_states)
         return {"location" : mean, "value": best_acq_value}
 
+# 20.07.18 ~ 20.07.20
+# using CE for deterministic optimization problem
+# we don't have to sample new hyperparameters when optimizing acquisition function
+    def compute_acquisition_function_CE_ver3(self, acquisition_function, grid, tasks, fast_update):
+
+        # At first, we have only Mk ep sols and x_stars
+        # if wanna get another sample of hyperparameter, should compute the x_stars and EP sols
+        # using performEPandgettingXstar method,,,,,,,,,,
+
+        logging.info("Computing %s using Cross Entropy deterministic version for %s. "%(self.acquisition_function_name, ', '.join(tasks) ))
+
+        avg_hypers = function_over_hypers
+
+        # %%%%%%%%%%%%%%%%%%%%%%%%%% CE algorithm for deterministic %%%%%%%%%%%%%%%%%%%%%%%%%
+
+        # 1. Initialize
+        #    first uninformative prior probability density distribution pdf : uniform dist'n
+        #    Randomly generate k solutions from that dist'n
+        # 2. Elite set and Update
+        #    Construct Elite set and update the parameter vector using elite set solutions
+        # 3. Stop
+        #    If stopping criteria is satisfied, stop
+        #    If not, go to the generation stage
+
+        #  %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+
+        # First Initializing process
+
+        # parameters
+        t = 1
+        k = 500
+        m = int(k * 0.1) # First elite set size
+        alpha = 0.5 # v parameter learning rate
+        threshold = None
+        v = None
+        thres_change_target = 0.01
+        #sum_T = N*k     ; Total Simulation budget is not need in deterministic version
+        #total_sampled_hyper = self.obj_model.num_states
+
+        #total_Simul_Budget = 25e4
+
+        # n dimension vector generating 
+        init_mean = []
+        for i in range(self.num_dims):
+            init_mean.append(0.5)
+
+        init_cov = []
+        for i in range(self.num_dims):
+            temp_vec = []
+            for j in range(self.num_dims):
+                if(i==j):
+                    temp_vec.append(1)
+                    continue
+                temp_vec.append(0)
+            init_cov.append(temp_vec)
+
+
+        # Generating candidates from initial pdf
+
+        candidates = []
+
+        logging.info("Generating candidates......")
+        generated_num = 0
+        while(True):
+            x = np.random.multivariate_normal(init_mean,init_cov)
+            generated_num = generated_num + 1
+            out_range = False
+            for i in range(self.num_dims):
+                if(x[i] < 0 or x[i] >1):
+                    out_range = True
+                    break
+
+            if(out_range):
+                continue
+
+            candidates.append(x)
+
+            if(len(candidates) >= k):
+                logging.info("we generated %d number of candidates using %d samples"%(k,generated_num))
+                break
+
+        # first solution set candidates is ready!
+
+        candidates = np.array(candidates)
+        
+        # getting sample averaged acquisition function values......t.
+        acq_candidates = avg_hypers(self.models.values(), acquisition_function,
+                                             candidates, compute_grad = False, tasks = tasks)
+
+
+        copied = copy.deepcopy(acq_candidates)
+        # Sorting the copied array in descending order....
+        #logging.info(type(copied))
+        copied = np.sort(copied)[::-1]
+
+        # Constructing elite_set
+        elite_set = []
+        for i in range(m):
+            origin_index = np.where(acq_candidates == copied[i])[0][0]
+            #logging.info(origin_index)
+            elite_set.append(candidates[origin_index])
+
+        while(True):
+            #logging.info("Updating process is being processed!!")
+            #logging.info("Simul total Budget is %d but right now is %d and sampled %d number of hypers"%(total_Simul_Budget,sum_T,total_sampled_hyper))
+            #logging.info(self.models.values()[0].num_states)
+            #logging.info(self.models.values()[0])
+            #logging.info(self.obj_model)
+
+            mean = np.mean(elite_set, axis = 0)
+
+            zero_vec = np.reshape(np.zeros(self.num_dims), (self.num_dims,1))
+            cov_mat  = np.matrix(np.matmul(zero_vec,zero_vec.T))
+
+            for item in elite_set:
+                dist = np.subtract(item, mean)
+                cov_mat = cov_mat + np.matrix(np.matmul(np.reshape(dist,(self.num_dims,1)),np.reshape(dist,(self.num_dims,1)).T ))
+
+            cov_mat = cov_mat / m
+
+            prev_v = v
+            v = (mean,cov_mat)
+            prev_threshold = threshold
+            threshold = (copied[m] + copied[m-1])/2
+
+            # Stopping_criteria should be revised to threshold value
+            thres_change_rate = np.abs(threshold - prev_threshold) / np.abs(prev_threshold) 
+            stopping_criteria = thres_change_rate * 100 < thres_change_target
+            stopping_criteria = (sum_T >= total_Simul_Budget) or total_sampled_hyper >= 200
+
+            # If stopping criteria is satisfied, we should break the while loop
+            if(stopping_criteria):
+                break
+
+            # Updating process is done
+
+            # Generation and Simulation process
+            # First, Generate candidate process
+            candidates = []
+            generated_num = 0
+            while(True):
+                x = np.random.multivariate_normal(mean,cov_mat)
+                generated_num = generated_num + 1
+
+                out_range = False
+                for i in range(self.num_dims):
+                    if(x[i] < 0 or x[i] >1):
+                        out_range = True
+                        break
+
+                if(out_range):
+                    continue
+
+                candidates.append(x)
+
+                if(len(candidates) >= k):
+                    #logging.info("we generated %d number of candidates using %d samples"%(k,generated_num))
+                    break
+
+            candidates = np.array(candidates)
+
+
+            # In current hyperparamters, 
+            # We calculate the acquisition function values in the candidate
+            new_acq_candidates = avg_hypers(self.models.values(), new_acquisition_function,
+                                             candidates, compute_grad = False, tasks = tasks)
+
+            copied = copy.deepcopy(new_acq_candidates)
+            # Sorting the array in descending order
+            copied = np.sort(copied)[::-1]
+
+
+            # Constructing elite set 
+            elite_set = []
+
+            for i in range(m):
+                origin_index = np.where(new_acq_candidates == copied[m])[0][0]
+                elite_set.append(candidates[origin_index])
+
+            # End of while loop
+            # End of CE algorithm
+
+
+        # reporting 'mean' as the best_acq_location
+        logging.info(mean)
+        
+        best_acq_value = avg_hypers(self.models.values(), acquisition_function, mean, compute_grad = False, tasks = tasks)[0]
+        logging.info(best_acq_value)
+        logging.info("in the compute acquisition function CE model num of state is %d"%self.obj_model.num_states)
+        return {"location" : mean, "value": best_acq_value}
+
     @property
     def objective_model(self):
         return self.models[self.objective.name]    
