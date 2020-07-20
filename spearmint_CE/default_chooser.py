@@ -424,7 +424,9 @@ class DefaultChooser(object):
                         hypers=hypers['duration hypers'].get(task_name, None),
                         fit_hypers=fit_hypers)
                     # print task.durations
-
+        logging.info("in the chooser fit method")
+        for item in self.obj_model._hypers_list:
+            logging.info(item)
         return new_hypers
 
     # generate a grid that includes the current best and some "spray" points
@@ -1015,6 +1017,9 @@ class DefaultChooser(object):
 # making covariance matrix has been updated
 # fitting N more hyperparameter process has been changed
 # I think the process will alleviate the time in creating acquisition function 
+
+# 20.07.20
+# Checking the newly sampled hyperparameter revised
     def compute_acquisition_function_CE_ver2(self, acquisition_function, grid, tasks, fast_update):
 
         # At first, we have only Mk ep sols and x_stars
@@ -1099,7 +1104,9 @@ class DefaultChooser(object):
         # first solution set candidates is ready!
 
         candidates = np.array(candidates)
-        
+        logging.info("in compute acuqisition_function CE ver2")
+        for item in self.obj_model._hypers_list:
+            logging.info(item)
         # getting sample averaged acquisition function values.......
         acq_candidates = avg_hypers(self.models.values(), acquisition_function,
                                              candidates, compute_grad = False, tasks = tasks)
@@ -1117,6 +1124,7 @@ class DefaultChooser(object):
             #logging.info(origin_index)
             elite_set.append(candidates[origin_index])
 
+        original_num_states = self.obj_model.options['mcmc_iters']
         while(True):
             #logging.info("Updating process is being processed!!")
             #logging.info("Simul total Budget is %d but right now is %d and sampled %d number of hypers"%(total_Simul_Budget,sum_T,total_sampled_hyper))
@@ -1191,6 +1199,9 @@ class DefaultChooser(object):
 
                 gp_instance_task.fit(inputs,values)
                 #logging.info(gp_instance_task.num_states)
+            logging.info("in updating process hyper list")
+            for item in self.obj_model._hypers_list:
+                logging.info(item)
 
             # N more fitting hyperparameters need to be coded in the above section........
 
@@ -1241,6 +1252,7 @@ class DefaultChooser(object):
         best_acq_value = avg_hypers(self.models.values(), acquisition_function, mean, compute_grad = False, tasks = tasks)[0]
         logging.info(best_acq_value)
         logging.info("in the compute acquisition function CE model num of state is %d"%self.obj_model.num_states)
+        self.obj_model.options['mcmc_iters'] = original_num_states
         return {"location" : mean, "value": best_acq_value}
 
 # 20.07.18 ~ 20.07.20
@@ -1277,9 +1289,9 @@ class DefaultChooser(object):
         k = 500
         m = int(k * 0.1) # First elite set size
         alpha = 0.5 # v parameter learning rate
-        threshold = None
+        threshold = np.inf
         v = None
-        thres_change_target = 0.01
+        thres_change_target = 0.0001
         #sum_T = N*k     ; Total Simulation budget is not need in deterministic version
         #total_sampled_hyper = self.obj_model.num_states
 
@@ -1352,7 +1364,9 @@ class DefaultChooser(object):
             #logging.info(self.models.values()[0].num_states)
             #logging.info(self.models.values()[0])
             #logging.info(self.obj_model)
-
+            logging.info("We are updating the paramerters")
+            #logging.info("Threshold value is %f"%threshold)
+            #logging.info("target change rate is %f"%thres_change_target)
             mean = np.mean(elite_set, axis = 0)
 
             zero_vec = np.reshape(np.zeros(self.num_dims), (self.num_dims,1))
@@ -1372,7 +1386,7 @@ class DefaultChooser(object):
             # Stopping_criteria should be revised to threshold value
             thres_change_rate = np.abs(threshold - prev_threshold) / np.abs(prev_threshold) 
             stopping_criteria = thres_change_rate * 100 < thres_change_target
-            stopping_criteria = (sum_T >= total_Simul_Budget) or total_sampled_hyper >= 200
+            #stopping_criteria = (sum_T >= total_Simul_Budget) or total_sampled_hyper >= 200
 
             # If stopping criteria is satisfied, we should break the while loop
             if(stopping_criteria):
@@ -1408,7 +1422,7 @@ class DefaultChooser(object):
 
             # In current hyperparamters, 
             # We calculate the acquisition function values in the candidate
-            new_acq_candidates = avg_hypers(self.models.values(), new_acquisition_function,
+            new_acq_candidates = avg_hypers(self.models.values(), acquisition_function,
                                              candidates, compute_grad = False, tasks = tasks)
 
             copied = copy.deepcopy(new_acq_candidates)
@@ -1498,6 +1512,11 @@ class DefaultChooser(object):
 
             val, loc = self.best_unconstrained(rec_grid)
             val_o, loc_o = self.bestObservedUnconstrained()
+
+
+            logging.info("In chooser best method")
+            for item in self.obj_model._hypers_list:
+                logging.info(item)
 
             rec =  {'model_model_input' : loc,
                     'model_model_value' : val,
