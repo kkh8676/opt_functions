@@ -601,7 +601,7 @@ class GP(AbstractModel):
     # howMany hyperparameters need to be parameterized
     # if fit_hypers is False, then we do not perform MCMC and use whatever we have
     # in other words, we are just changing setting the data if fit_hypers is False
-    def fit_incre(self, inputs, values, pending=None, hypers=None, reburn=False, fit_hypers=True, increasing_num):
+    def fit_incre(self, inputs, values, pending=None, hypers=None, reburn=False, fit_hypers=True, increasing_num=5):
         # Set the data for the GP
         self._inputs = inputs
         self._values = values
