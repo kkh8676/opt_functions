@@ -495,6 +495,8 @@ class DefaultChooser(object):
             # i use pending as the grid seed so that you don't suggest the same thing over and over
             # when you have multiple cores -- cool. this was probably weird on the 3 core thing
             suggestion = sobol_grid.generate(self.num_dims, grid_size=100, grid_seed=total_pending)[0]
+            suggestion = np.random.rand(self.num_dims)
+            logging.info(suggestion)
             # above: for some reason you can't generate a grid of size 1. heh.
 
             suggestion = self.input_space.from_unit(suggestion) # convert to original space
@@ -566,8 +568,12 @@ class DefaultChooser(object):
         # task_groups : decoupled task groups
         # group       : number of decoupled task groups, dictionary key
         # task_group  : in that number of group, objective and const1 const2 and so on....
-        for group, task_group in task_groups.iteritems():
-            task_acqs[group] = self.compute_acquisition_function(acquisition_function, acq_grid, task_group, fast_update)
+
+        # 20.08.07
+        # below code is deleted 
+        # because of using saa algorithm
+        # for group, task_group in task_groups.iteritems():
+        #     task_acqs[group] = self.compute_acquisition_function(acquisition_function, acq_grid, task_group, fast_update)
         # Now task_acqs is a dict, with keys being the arbitrary group index, and the values
         # being a dict with keys "location" and "value"
 
@@ -575,21 +581,23 @@ class DefaultChooser(object):
         # do compute_acquisition_function until the SAA algorithm stopping criterion is satisfied
         hyper_increasing_num = 5 
 
-        # SAA algorithm
+        # %%%%%%%%%%%%%%%%%%%%%%%%% SAA algorithm %%%%%%%%%%%%%%%%%%%%%%%%%%%%
         howManyLast = 4
         diff_thres = 0.01
         acq_opt_logs = []
-        
+        round_num = 1 
         while(True):
+            # logging.info("%d round saa algorithm is being done!"%round_num)
             for group, task_group in task_groups.iteritems():
-                task_acqs[group] = self.compute_acquisition_function(acquisition_function.....)
+                task_acqs[group] = self.compute_acquisition_function(acquisition_function, acq_grid, task_group, fast_update)
                 acq_opt_logs.append(task_acqs[group])
 
             # using acq_opt-logs check the stopping criteria
-            gotLen = len(acq_opt_logs) < howManyLast
+            gotLen = len(acq_opt_logs) >= howManyLast
             unchanged_seq = True
             if(gotLen):
                 last_ = acq_opt_logs[-4:]
+                
                 last_sols = [ dictionary["location"] for dictionary in last_ ]
                 
                 avg_sol = np.average(last_sols, axis=0)
@@ -597,10 +605,10 @@ class DefaultChooser(object):
                 for idx in range(howManyLast):
                     if(unchanged_seq):
                         cur_sol = last_sols[idx]
-                        diff = np.subtract(cur_sol,diff)
+                        diff = np.subtract(cur_sol,avg_sol)
 
                         for dim in range(len(diff)):
-                            if(np.abs(diff[abs] > diff_thres)):
+                            if(np.abs(diff[dim] > diff_thres)):
                                 unchanged_seq = False
                                 break
 
@@ -620,6 +628,7 @@ class DefaultChooser(object):
             # sample hyper_increasing_num number of hyperparameters
             # fit the GP model using that hyperparameter
             # refered default_chooser.py fit method 
+            new_hyper = dict()
             for task_name_key, task in self.tasks.iteritems():
                 new_hyper[task_name_key] = self.models[task_name_key].fit_incre(
                     self.models[task_name_key]._inputs,
@@ -636,15 +645,18 @@ class DefaultChooser(object):
             # in 'create_acquisition_function' method
             # function_over_hypers(models,self.performEPandXStarSamplingForOneState,
             #                       obj_model, con_models_dict, fast, num_random_features, x_star_tolerance, num_x_star_samples )
-            function_over_hypers(self.models.values(), self.acquisition_function_instance.performEPandXStarSamplingForOneState,
-                self.objective_model_dict, self.constraint_models_dict, fast_update, self.options['pes_num_rand_features'],
+            function_over_hypers(self.models.values(), self.acquisition_function_instance.performEPandXstarSamplingForOneState,
+                self.objective_model_dict.values()[0], self.constraint_models_dict, fast_update, self.options['pes_num_rand_features'],
+                self.options['pes_opt_x*_tol'],
                 self.options['pes_num_x*_samples'])
 
             # in 'acquisition' method, there is code which returns existing acq_values 
             # so just fitting the new GP model with newly sampled hyperparameters
 
-
-
+            round_num = round_num + 1 
+        # %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% SAA algorirhm over #######################
+        logging.info("Total %d round has been done in SAA algorithm!"%round_num)
+        logging.info("Total %d num of hyperparameters has been sampled"%self.objective_model_dict.values()[0].num_states)
         # after while loop is over
         # in task_acqs[group] last solution will be saved....... i think
 
@@ -928,7 +940,7 @@ class DefaultChooser(object):
             random_rec = npr.rand(1,self.num_dims)
 
             # what is the point of this exactly? oh well
-            rec =  {'model_model_input' : self.input_space.from_unit(random_rec),
+            rec =  {'model_model_input' : self.input_space.from_unit(random_rec)[0],
                     'model_model_value' : None,
                     'obser_obser_input' : None,
                     'obser_obser_value' : None,
