@@ -364,17 +364,6 @@ def main(expt_dir, config_file="config.json", no_output=False, repeat=-1):
                                                       expt_dir, output_directory)
 
 
-                # %%%%%%%%% this process can be done after suggestion process!!! %%%%%%%
-                # if we wanna get the argmin μ(x) using all the sampled hyperparameters
-                # recommendation process has been changed....
-                if options['recommendations'] == "during":
-                    # Compute the best value so far, a.k.a. the "recommendation"
-                    recommendation = chooser.best()
-
-                    # Save the recommendation in the DB if there are more complete jobs than last time
-                    store_recommendation(recommendation, db, experiment_name, tasks, jobs, input_space, time.time()-overall_start_time)
-
-
 
                 # Print the current time
                 logging.info('Current time: %s' % datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
@@ -400,6 +389,17 @@ def main(expt_dir, config_file="config.json", no_output=False, repeat=-1):
 
                 # For debug - print pending jobs
                 print_pending_jobs(jobs)
+
+
+                                # %%%%%%%%% this process can be done after suggestion process!!! %%%%%%%
+                # if we wanna get the argmin μ(x) using all the sampled hyperparameters
+                # recommendation process has been changed....
+                if options['recommendations'] == "during":
+                    # Compute the best value so far, a.k.a. the "recommendation"
+                    recommendation = chooser.best()
+
+                    # Save the recommendation in the DB if there are more complete jobs than last time
+                    store_recommendation(recommendation, db, experiment_name, tasks, jobs, input_space, time.time()-overall_start_time)
 
         # Terminate the optimization if all resources are finished (run max number of jobs)
         # or ANY task is finished (just my weird convention)
