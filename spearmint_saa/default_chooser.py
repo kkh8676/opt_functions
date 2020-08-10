@@ -525,7 +525,7 @@ class DefaultChooser(object):
 
         # 20.08.05
         # so add the condition if we are using EI, we can jump this process, not done yet
-        if not self.best_computed and self.options['recommendations'] == "during":
+        if not self.best_computed and self.options['recommendations'] == "during" and self.options['acquisition'] == 'EI':
             self.best() # sets self.stored_recommendation
         # only need to do this because EI uses current_best_value --
         # otherwise could run the whole thing without making recommendations at each iteration
@@ -582,7 +582,7 @@ class DefaultChooser(object):
         hyper_increasing_num = 5 
 
         # %%%%%%%%%%%%%%%%%%%%%%%%% SAA algorithm %%%%%%%%%%%%%%%%%%%%%%%%%%%%
-        howManyLast = 4
+        howManyLast = 3
         diff_thres = 0.01
         acq_opt_logs = []
         round_num = 1 
@@ -596,7 +596,7 @@ class DefaultChooser(object):
             gotLen = len(acq_opt_logs) >= howManyLast
             unchanged_seq = True
             if(gotLen):
-                last_ = acq_opt_logs[-4:]
+                last_ = acq_opt_logs[-howManyLast:]
                 
                 last_sols = [ dictionary["location"] for dictionary in last_ ]
                 
@@ -607,10 +607,18 @@ class DefaultChooser(object):
                         cur_sol = last_sols[idx]
                         diff = np.subtract(cur_sol,avg_sol)
 
-                        for dim in range(len(diff)):
-                            if(np.abs(diff[dim] > diff_thres)):
-                                unchanged_seq = False
-                                break
+                        # converged measure....
+                        # distance between two converged vector getting bigger with increasing dimension
+                        
+                        if(np.linalg.norm(diff) > (len(diff)*(diff_thres**2))**0.5):
+                        	unchanged_seq = False
+                        	break
+
+
+                        #for dim in range(len(diff)):
+                        #    if(np.abs(diff[dim] > diff_thres)):
+                        #        unchanged_seq = False
+                        #        break
 
 
             
@@ -622,7 +630,7 @@ class DefaultChooser(object):
             # sample new hyperparameters and fitting GP models, for hyper_increasing_num times
             # default chooser fit reference, i think we should use GP instance 
 
-            logging.info("sample 'hyper_increasing_num' hyperparameters ")
+            logging.info("sample %d hyperparameters "%hyper_increasing_num)
 
 
             # sample hyper_increasing_num number of hyperparameters
