@@ -779,6 +779,11 @@ class DefaultChooser(object):
     # 20.08.08
     # referencing real SAA algorithm
     # using M replications with N samples.....
+
+    # 20.08.19 .......
+    # compute_acquisition_function_for_newly_sampled_hyper
+    # compute_acquisition_function_subset
+    # 
     def suggest_v2(self, task_couplings):
 
         if not isinstance(task_couplings, dict):
@@ -926,15 +931,17 @@ class DefaultChooser(object):
             task_acqs[group] = self.compute_acquisition_function(acquisition_function, acq_grid, task_group, fast_update)
             acq_opt_sols.append(task_acqs[group])
 
+        round_num = 0
+
         while(True):
             # 2. sample average approximation optimization for M replication
-            round_num = 0
+            
             # for replication M
             for m in range(M):
                 # Generate N sample
                 # generate N sample of hyperparameter and fit the GP model using that hyperparameter
 
-                for task_name, task in self.tasks.iteritems():
+                for task_name_key, task in self.tasks.iteritems():
                     new_hyper[task_name_key] = self.models[task_name_key].fit_incre(
                         self.models[task_name_key]._inputs,
                         self.models[task_name_key]._values,
@@ -987,19 +994,24 @@ class DefaultChooser(object):
                 # %%%%%%%%%% should be modified %%%%%%%%
                 # randomly get N_prime number of states in the GP 
                 # and compute acquisition_ function for that states.......
+
+                # x_hat should be selected from x_hat_cands....
+                # so, in compute_acquisition_function_subset no optimize acq part...
                 N_prime_acq_opt[group] = self.compute_acquisition_function_subset(self.models.values(), acquisition_function, sample_size_N_prime,
                                                         grid, compute_grid = False, tasks=tasks)
 
             # x_ hat is the best location in N_prime_acq_opt["location"]
             # which have best performance in g_N_prime
-            x_hat = N_prime_acq_opt["location"]
+
+            # this code should be modified for constrained version
+            x_hat = N_prime_acq_opt[group]["location"]
 
             # using N prime number of sample averaging .........
             # for that purpose, function_over_hypers method should be modified
             # should get 'function' ?
             # 'grid' parameter gets the value of x_hat
             # this value is N_prime_acq_opt["value"]
-            g_N_prime_at_x_hat = N_prime_acq_opt["value"]
+            g_N_prime_at_x_hat = N_prime_acq_opt[group]["value"]
 
             # using total number of sample averaging
             # for this purpose, function_over_hypers don't need to be modified..
@@ -1031,9 +1043,22 @@ class DefaultChooser(object):
             sample_size_N = sample_size_N + 1
             sample_size_N_prime = sample_size_N_prime + 3
             round_num = round_num + 1
+            acq_opt_logs = []
 
-
+            # we need to clean the GP instances state.......
+            # gp_instance._cache_list 
+            # _hypers_list
+            # self.state
+            # num_states
             # in 'acquisition' method, there is code which returns existing acq_values 
+
+            for task_name, task in self.tasks.iteritems():
+                self.models[task_name_key]._cache_list = []
+                self.models[task_name_key]._hypers_list = []
+                self.models[task_name_key].state = None
+                self.models[task_name_key].num_states = 0
+
+
             # so just fitting the new GP model with newly sampled hyperparameters
 
         # after while loop is over
@@ -1300,103 +1325,11 @@ class DefaultChooser(object):
         best_acq_location = grid[best_acq_ind]
         best_grid_acq_value  = np.max(grid_acq)
 
-        has_grads = self.acquisition_function_instance.has_gradients
+        
 
-        if self.options['optimize_acq']:
+        
 
-            if self.options['check_grad']:
-                check_grad(lambda x: avg_hypers(self.models.values(), acquisition_function, 
-                    x, compute_grad=True), best_acq_location)
-
-            if nlopt_imported:
-
-                # alg means algorithm
-                alg = self.nlopt_method if has_grads else self.nlopt_method_derivative_free
-                opt = nlopt.opt(alg, self.num_dims)
-
-                logging.info('Optimizing %s with NLopt, %s' % (self.acquisition_function_name, opt.get_algorithm_name()))
-                
-                opt.set_lower_bounds(0.0)
-                opt.set_upper_bounds(1.0)
-
-                # define the objective function
-                def f(x, put_gradient_here):
-                    if x.ndim == 1:
-                        x = x[None,:]
-
-                    if put_gradient_here.size > 0:
-                        a, a_grad = avg_hypers(self.models.values(), acquisition_function, 
-                                x, compute_grad=True, tasks=tasks)
-                        put_gradient_here[:] = a_grad.flatten()
-                    else:
-                        a = avg_hypers(self.models.values(), acquisition_function,
-                                x, compute_grad=False, tasks=tasks)
-
-                    return float(a)
-
-                opt.set_max_objective(f)
-                opt.set_xtol_abs(self.options['fast_opt_acq_tol'] if fast_update else self.options['opt_acq_tol'])
-                opt.set_maxeval(self.options['fast_acq_grid_size'] if fast_update else self.options['acq_grid_size'])
-
-                x_opt = opt.optimize(best_acq_location.copy())
-
-                returncode = opt.last_optimize_result()
-                # y_opt = opt.last_optimum_value()
-                y_opt = f(x_opt, np.array([]))
-
-                # overwrite the current best if optimization succeeded
-                if (returncode > 0 or returncode==-4) and y_opt > best_grid_acq_value:
-                    print_nlopt_returncode(returncode, logging.debug)
-
-                    best_acq_location = x_opt
-                    best_acq_value = y_opt
-                else:
-                    best_acq_value = best_grid_acq_value
-
-            else: # use bfgs
-                # see http://docs.scipy.org/doc/scipy-0.14.0/reference/generated/scipy.optimize.fmin_l_bfgs_b.html
-                logging.info('Optimizing %s with L-BFGS%s' % (self.acquisition_function_name, '' if has_grads else ' (numerically estimating gradients)'))
-
-                if has_grads:
-                    def f(x):
-                        if x.ndim == 1:
-                            x = x[None,:]
-                        a, a_grad = avg_hypers(self.models.values(), acquisition_function, 
-                                    x, compute_grad=True, tasks=tasks)
-                        return (-a.flatten(), -a_grad.flatten())
-                else:
-                    def f(x):
-                        if x.ndim == 1:
-                            x = x[None,:]
-
-                        a = avg_hypers(self.models.values(), acquisition_function, 
-                                    x, compute_grad=False, tasks=tasks)
-
-                        return -a.flatten()
-                
-                bounds = [(0,1)]*self.num_dims
-                x_opt, y_opt, opt_info = spo.fmin_l_bfgs_b(f, best_acq_location.copy(), 
-                    bounds=bounds, disp=0, approx_grad=not has_grads)
-                y_opt = -y_opt
-                # make sure bounds are respected
-                x_opt[x_opt > 1.0] = 1.0
-                x_opt[x_opt < 0.0] = 0.0
-
-
-                if y_opt > best_grid_acq_value:
-                    best_acq_location = x_opt
-                    best_acq_value = y_opt
-                else:
-                    best_acq_value = best_grid_acq_value
-
-            logging.debug('Best %s before optimization: %f' % (self.acquisition_function_name, best_grid_acq_value))
-            logging.debug('Best %s after  optimization: %f' % (self.acquisition_function_name, best_acq_value))
-
-        else:
-            # do not optimize the acqusition function
-            logging.debug('Best %s on grid: %f' % (self.acquisition_function_name, best_grid_acq_value))
-
-        return {"location" : best_acq_location, "value" : best_acq_value}
+        return {"location" : best_acq_location, "value" : best_grid_acq_value}
 
     @property
     def objective_model(self):
