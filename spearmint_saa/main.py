@@ -339,7 +339,8 @@ def main(expt_dir, config_file="config.json", no_output=False, repeat=-1):
                 logging.info('\nGetting suggestion for %s...\n' % (', '.join(task_couplings.keys())))
 
                 # Get the next suggested experiment from the chooser.
-                suggested_input, suggested_tasks = chooser.suggest(task_couplings)
+                suggested_input, suggested_tasks = chooser.suggest_v2(task_couplings)
+                logging.info(suggested_tasks)
                 suggested_task = suggested_tasks[0] # hack, deal with later
 
                 suggested_job = {
