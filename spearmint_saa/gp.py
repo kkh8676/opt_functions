@@ -198,6 +198,7 @@ from ..                       import transformations
 from ..transformations        import Transformer   
 from ..transformations        import SimpleTransformer
 
+import logging
 # try:
 #     module = sys.modules['__main__'].__file__
 #     log    = logging.getLogger(module)
@@ -272,6 +273,7 @@ class GP(AbstractModel):
         self._cache_list = list()
 
         # inputs_hash = hash(self.inputs.tostring())
+        #logging.info("num states is %d"%self.num_states)
         for i in xrange(self.num_states):
             self.set_state(i)
             chol  = spla.cholesky(self.kernel.cov(self.inputs), lower=True)
@@ -517,6 +519,8 @@ class GP(AbstractModel):
 
     def set_state(self, state):
         self.state = state
+        #logging.info(state)
+        #logging.info(len(self._hypers_list))
         self._set_params_from_dict(self._hypers_list[state])
 
     def to_dict(self):
@@ -688,7 +692,7 @@ class GP(AbstractModel):
             self._collect_samples(increasing_num)
 
             # Now we have more states
-            self.num_states = self.num_states + increasing_num
+            self.num_states = increasing_num
         else:
             if len(self._hypers_list) == 0:
                 # Just use the current hypers as the only state
@@ -738,11 +742,13 @@ class GP(AbstractModel):
         inputs = self.inputs
         values = self.values
 
+        #logging.info("predict process has being done!")
         # if pred.shape[1] != self.num_dims:
             # raise Exception("Dimensionality of test points is %d but dimensionality given at init time is %d." % (pred.shape[1], self.num_dims))
 
         # Special case if there is no data yet --> predict from the prior
         if not self.has_data:
+            #logging.info("here?")
             return self.predict_from_prior(pred, full_cov, compute_grad)
 
         # The primary covariances for prediction.

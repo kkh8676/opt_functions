@@ -193,6 +193,8 @@ import scipy.stats  as sps
 
 from abc import ABCMeta, abstractmethod
 
+import logging
+
 class AbstractModel(object):
     __metaclass__ = ABCMeta
 
@@ -249,7 +251,7 @@ def function_over_hypers_subset(models, fun, subset, *fun_args, **fun_kwargs):
     # only average over a subset of the states
     if subset < min_num_states:
         states = random.sample(states, subset)
-    
+
     for i,state in enumerate(states):
 
         for model in models:
@@ -285,9 +287,9 @@ def function_over_hypers_subset(models, fun, subset, *fun_args, **fun_kwargs):
     # Divide by numAveraged to get the average (right now we just have the sum)
     if isTuple:
         for j in xrange(len(average)):
-            average[j] /= min_num_states
+            average[j] /= len(states)
     else:
-        average /= min_num_states
+        average /= len(states)
     
     return average
 
@@ -359,6 +361,8 @@ def function_over_hypers_specific(models, fun, offset, subset, *fun_args, **fun_
     # only average over a subset of the states
     if subset < min_num_states:
         states = states[offset*subset:(offset+1)*subset]
+
+
     
     for i,state in enumerate(states):
 
@@ -395,9 +399,9 @@ def function_over_hypers_specific(models, fun, offset, subset, *fun_args, **fun_
     # Divide by numAveraged to get the average (right now we just have the sum)
     if isTuple:
         for j in xrange(len(average)):
-            average[j] /= min_num_states
+            average[j] /= len(states)
     else:
-        average /= min_num_states
+        average /= len(states)
     
     return average
 
