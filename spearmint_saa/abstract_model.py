@@ -346,3 +346,58 @@ def function_over_hypers_subset_last(models, fun, subset, *fun_args, **fun_kwarg
     
     return average
 
+
+def function_over_hypers_specific(models, fun, offset, subset, *fun_args, **fun_kwargs):
+
+    # subset is a integer!
+    # The the minimum of the number of states over the different models
+    # getting the minimum number of states in each model.......
+    min_num_states = reduce(min, map(lambda x: x.num_states, models), np.inf)
+
+    states = range(min_num_states)
+
+    # only average over a subset of the states
+    if subset < min_num_states:
+        states = states[offset*subset:(offset+1)*subset]
+    
+    for i,state in enumerate(states):
+
+        for model in models:
+            model.set_state(state)
+        
+        result = fun(*fun_args, **fun_kwargs) # Evaluate the function
+
+        # The first time you evaluate, see how big the arrays are
+        # and initialize arrays for the results
+        if i == 0:
+            if type(result) is tuple:
+                isTuple = True
+                average = [np.zeros(r.shape) for r in result]
+            else:
+                isTuple = False
+                average = np.zeros(result.shape)
+
+        if isTuple:
+            if len(result) != len(average):
+                raise Exception("Result is %s, average is %s, lengths don't match" % (result, average))
+            for j in xrange(len(average)):
+                if result[j].shape != average[j].shape:
+                    raise Exception("Result[%d] shape is %s, average[%d] shape is %s, shapes don't match" % (j, result[j].shape, j, average[j].shape))
+                average[j] += result[j]
+        else:
+            if not isinstance(result, np.ndarray):
+                print result
+                raise Exception("Result is not numpy array: %s" % result)
+            if result.shape != average.shape:
+                raise Exception("Result is %s, shape %s, average is %s, shape %s, shapes don't match" % (result, result.shape, average, average.shape))
+            average += result
+    
+    # Divide by numAveraged to get the average (right now we just have the sum)
+    if isTuple:
+        for j in xrange(len(average)):
+            average[j] /= min_num_states
+    else:
+        average /= min_num_states
+    
+    return average
+
