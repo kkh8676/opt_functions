@@ -199,6 +199,8 @@ from spearmint.utils.nlopt           import print_nlopt_returncode
 from spearmint.grids                 import sobol_grid
 from spearmint.models.abstract_model import function_over_hypers
 from spearmint.models.abstract_model import function_over_hypers_single
+from spearmint.models.abstract_model import function_over_hypers_subset_last
+from spearmint.models.abstract_model import function_over_hypers_subset
 from spearmint.models.gp             import GP
 from spearmint                       import models
 from spearmint                       import acquisition_functions
@@ -929,7 +931,7 @@ class DefaultChooser(object):
         # get the first estimated optimal solution from current hyperparameters
         for group, task_group in task_groups.iteritems():
             task_acqs[group] = self.compute_acquisition_function(acquisition_function, acq_grid, task_group, fast_update)
-            acq_opt_sols.append(task_acqs[group])
+            acq_opt_logs.append(task_acqs[group])
 
         round_num = 0
 
@@ -937,12 +939,13 @@ class DefaultChooser(object):
             # 2. sample average approximation optimization for M replication
             
             # for replication M
-            for m in range(M):
+            for m in range(replication_M):
+                logging.info("%d th replication is being processed!"%m)
                 # Generate N sample
                 # generate N sample of hyperparameter and fit the GP model using that hyperparameter
 
                 for task_name_key, task in self.tasks.iteritems():
-                    new_hyper[task_name_key] = self.models[task_name_key].fit_incre(
+                    self.models[task_name_key].fit_incre(
                         self.models[task_name_key]._inputs,
                         self.models[task_name_key]._values,
                         pending = task.normalized_pending(self.input_space),
@@ -955,8 +958,8 @@ class DefaultChooser(object):
                 # in performEP and X star sampling method in PES.py 
                 # there are process which jump if there is existing EP sol and x star sol
                 # so in this process, function_over_hypers process don't need to be modified
-                function_over_hypers(self.models.values(), self.acquisition_function_instance.performEPandXStarSamplingForOneState,
-                    self.objective_model_dict,
+                function_over_hypers(self.models.values(), self.acquisition_function_instance.performEPandXstarSamplingForOneState,
+                    self.objective_model_dict.values()[0],
                     self.constraint_models_dict,
                     fast_update,
                     self.options['pes_num_rand_features'],
@@ -989,7 +992,7 @@ class DefaultChooser(object):
             # x_hat should be chosen in acq_opt_logs by the performance of g_N_prime
             # using compute_acquisition_function, deleting if self.options["optimize_acq"] part
             # and parameter 'grid' gets the list of locations in 'acq_opt_logs'
-            x_hat_cands = [ dictionary["location"] for dictionary in acq_opt_logs ]
+            x_hat_cands = np.array([ dictionary["location"] for dictionary in acq_opt_logs ])
             N_prime_acq_opt = dict()
             for group, task_group in task_groups.iteritems():
                 # %%%%%%%%%% should be modified %%%%%%%%
@@ -1000,14 +1003,15 @@ class DefaultChooser(object):
                 # so, in compute_acquisition_function_subset no optimize acq part...
                 # def compute_acquisition_function_subset(self, acquisition_function, grid, num_subset, tasks, fast_update):
                 N_prime_acq_opt[group] = self.compute_acquisition_function_subset(acquisition_function, x_hat_cands, sample_size_N_prime,
-                                                        tasks, fast_update)
+                                                        task_group, fast_update)
 
             # x_ hat is the best location in N_prime_acq_opt["location"]
             # which have best performance in g_N_prime
 
             # this code should be modified for constrained version
             x_hat = N_prime_acq_opt[group]["location"]
-
+            #logging.info("x hat is %s"%str(x_hat))
+            #logging.info("x_hat is %s"%str(np.array([x_hat])))
             # using N prime number of sample averaging .........
             # for that purpose, function_over_hypers method should be modified
             # should get 'function' ?
@@ -1018,7 +1022,7 @@ class DefaultChooser(object):
             # using total number of sample averaging
             # for this purpose, function_over_hypers don't need to be modified..
             g_bar_N_M_at_x_hat = function_over_hypers(self.models.values(),acquisition_function,
-                x_hat, compute_grad = False, tasks = task_group)
+                np.array([x_hat]), compute_grad = False, tasks = task_group)
 
             est_v_star = np.average([dictionary["value"] for dictionary in acq_opt_logs])
 
@@ -1135,7 +1139,7 @@ class DefaultChooser(object):
 
         # This is where tasks compete
         if len(task_groups.keys()) > 1: # if there is competitive decoupling, do this -- it would be fine anyway, but i don't want it to print stuff
-            for group, best_acq in task_acqs.iteritems():
+            for group, best_acq in N_prime_acq_opt.iteritems():
                 best_acq["value"] /= group_costs[group]
                 if group_costs[group] != 1:
                     logging.debug("Scaling best acq for %s by a %s factor of 1/%f, from %f to %f" % ( \
@@ -1150,14 +1154,14 @@ class DefaultChooser(object):
         # Now, we need to find the task with the max acq value
         max_acq_value = -np.inf
         best_group = None
-        for group, best_acq in task_acqs.iteritems():
+        for group, best_acq in N_prime_acq_opt.iteritems():
             if best_acq["value"] > max_acq_value:
                 best_group = group
                 max_acq_value = best_acq["value"]
 
         # Now we know which group to evaluate
-        suggested_location = task_acqs[best_group]["location"]
-        best_acq_value     = task_acqs[best_group]["value"]
+        suggested_location = N_prime_acq_opt[best_group]["location"]
+        best_acq_value     = N_prime_acq_opt[best_group]["value"]
         suggested_tasks    = task_groups[best_group]
 
         # Make sure we didn't do anything weird with the bounds
@@ -1379,11 +1383,11 @@ class DefaultChooser(object):
                         x = x[None,:]
 
                     if put_gradient_here.size > 0:
-                        a, a_grad = avg_hypers(self.models.values(), acquisition_function, 
+                        a, a_grad = avg_hypers(self.models.values(), acquisition_function, newly_sampled_num,
                                 x, compute_grad=True, tasks=tasks)
                         put_gradient_here[:] = a_grad.flatten()
                     else:
-                        a = avg_hypers(self.models.values(), acquisition_function,
+                        a = avg_hypers(self.models.values(), acquisition_function, newly_sampled_num,
                                 x, compute_grad=False, tasks=tasks)
 
                     return float(a)
@@ -1415,7 +1419,7 @@ class DefaultChooser(object):
                     def f(x):
                         if x.ndim == 1:
                             x = x[None,:]
-                        a, a_grad = avg_hypers(self.models.values(), acquisition_function, 
+                        a, a_grad = avg_hypers(self.models.values(), acquisition_function, newly_sampled_num,
                                     x, compute_grad=True, tasks=tasks)
                         return (-a.flatten(), -a_grad.flatten())
                 else:
@@ -1423,7 +1427,7 @@ class DefaultChooser(object):
                         if x.ndim == 1:
                             x = x[None,:]
 
-                        a = avg_hypers(self.models.values(), acquisition_function, 
+                        a = avg_hypers(self.models.values(), acquisition_function, newly_sampled_num,
                                     x, compute_grad=False, tasks=tasks)
 
                         return -a.flatten()
