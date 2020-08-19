@@ -657,6 +657,62 @@ class GP(AbstractModel):
 
         return self.to_dict()
 
+    # if fit_hypers is False, then we do not perform MCMC and use whatever we have
+    # in other words, we are just changing setting the data if fit_hypers is False
+    def fit_start(self, inputs, values, pending=None, hypers=None, reburn=False, fit_hypers=True, increasing_num = 5):
+        # Set the data for the GP
+        self._inputs = inputs
+        self._values = values
+
+        if self.options['mcmc_iters'] == 0: # do not do MCMC
+            fit_hypers = False
+
+        self._fantasy_values_list = []  # fantasy of pendings
+
+        # Initialize the GP with hypers if provided, or else set them to their default
+        if hypers:
+            self.from_dict(hypers)
+        else:
+            self.reset_params()
+
+        if fit_hypers:
+            # self._hypers_list = []  # samples hypers
+            # self._cache_list  = []  # caching cholesky
+            self.chain_length = 0   # chain of hypers
+
+            # Burn samples (if needed)
+            num_samples_to_burn = self.options['burnin'] if reburn or self.chain_length < self.options['burnin'] else 0
+            self._burn_samples(num_samples_to_burn)
+
+            # Now collect some samples (sets self._hypers_list)
+            self._collect_samples(increasing_num)
+
+            # Now we have more states
+            self.num_states = self.num_states + increasing_num
+        else:
+            if len(self._hypers_list) == 0:
+                # Just use the current hypers as the only state
+                self._hypers_list = [self.to_dict()['hypers']]
+                self.num_states  = 1
+
+        self._cache_list  = []  # i think you need to do this before collecting fantasies...
+
+        # Set pending data and generate corresponding fantasies
+        if pending is not None:
+            self.pending              = pending
+            self._fantasy_values_list = self._collect_fantasies(pending)
+
+        # Actually compute the cholesky and all that stuff -- this is the "fitting"
+        # If there is new data (e.g. pending stuff) but fit_hypers is False
+        # we still want to do this... because e.g. new pending stuff does change the cholesky. 
+        if self.caching() and self.has_data:
+            self._prepare_cache()
+
+        # Set the hypers to the final state of the chain
+        self.set_state(len(self._hypers_list)-1)
+
+        return self.to_dict()
+
     def log_likelihood(self):
         """
         GP Marginal likelihood
