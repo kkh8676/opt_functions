@@ -201,6 +201,7 @@ from spearmint.models.abstract_model import function_over_hypers
 from spearmint.models.abstract_model import function_over_hypers_single
 from spearmint.models.abstract_model import function_over_hypers_subset_last
 from spearmint.models.abstract_model import function_over_hypers_subset
+from spearmint.models.abstract_model import function_over_hypers_specific
 from spearmint.models.gp             import GP
 from spearmint                       import models
 from spearmint                       import acquisition_functions
@@ -613,8 +614,8 @@ class DefaultChooser(object):
                         # distance between two converged vector getting bigger with increasing dimension
                         
                         if(np.linalg.norm(diff) > (len(diff)*(diff_thres**2))**0.5):
-                            unchanged_seq = False
-                            break
+                        	unchanged_seq = False
+                        	break
 
 
                         #for dim in range(len(diff)):
@@ -811,6 +812,7 @@ class DefaultChooser(object):
             # i use pending as the grid seed so that you don't suggest the same thing over and over
             # when you have multiple cores -- cool. this was probably weird on the 3 core thing
             suggestion = sobol_grid.generate(self.num_dims, grid_size=100, grid_seed=total_pending)[0]
+            suggestion = np.random.rand(self.num_dims)
             # above: for some reason you can't generate a grid of size 1. heh.
 
             suggestion = self.input_space.from_unit(suggestion) # convert to original space
@@ -910,20 +912,20 @@ class DefaultChooser(object):
         deleting_samples_so_far = True # Original SAA algorithm, True value is default
 
 
-
-        # 2. 3. 4. process........
-        acq_opt_logs = []
-
-        # get the first estimated optimal solution from current hyperparameters
-        for group, task_group in task_groups.iteritems():
-            task_acqs[group] = self.compute_acquisition_function(acquisition_function, acq_grid, task_group, fast_update)
-            acq_opt_logs.append(task_acqs[group])
-
         round_num = 0
 
         while(True):
             # 2. sample average approximation optimization for M replication
 
+                        # fit hyperparameter 
+            for task_name, task in self.tasks.iteritems():
+                self.models[task_name].fit_start(
+                    self.models[task_name]._inputs,
+                    self.models[task_name]._values,
+                    pending = task.normalized_pending(self.input_space),
+                    hypers = None,
+                    fit_hypers = True,
+                    increasing_num = replication_M*sample_size_N)
 
             # initialize/create the acquisition function
             logging.info("Initializing %s in round %d" %( self.acquisition_function_name, round_num))
@@ -935,15 +937,7 @@ class DefaultChooser(object):
                 x_star_tolerance=self.options['pes_opt_x*_tol'],
                 num_x_star_samples=self.options['pes_num_x*_samples'])
 
-            # fit hyperparameter 
-            for task_name, task in self.tasks.iteritems():
-                self.models[task_name].fit_start(
-                    self.models[task_name]._inputs,
-                    self.models[task_name]._values,
-                    pending = task.normalized_pending(self.input_space),
-                    hypers = None,
-                    fit_hypers = True,
-                    increasing_num = replication_M*sample_size_N - self.models[task_name].num_states)
+
 
             function_over_hypers(self.models.values(), self.acquisition_function_instance.performEPandXstarSamplingForOneState,
                     self.objective_model_dict.values()[0],
@@ -952,10 +946,11 @@ class DefaultChooser(object):
                     self.options['pes_num_rand_features'],
                     self.options['pes_opt_x*_tol'],
                     self.options['pes_num_x*_samples'])
-            
+
+            acq_opt_logs = []
             # for replication M
             for m in range(replication_M):
-                logging.info("%d th replication is being processed!"%m)
+                
 
                 # performEP and X star sampling for those newly sampled hyperparameters
                 # in performEP and X star sampling method in PES.py 
@@ -969,10 +964,13 @@ class DefaultChooser(object):
                 # because this sample average path is from newly sampled hyperparameter not total.
                 for group, task_group in task_groups.iteritems():
                     # def compute_acquisition_function_for_newly_sampled_hyper(self, acquisition_function, grid, tasks, fast_update):
+                    
                     task_acqs[group] = self.compute_acquisition_function_for_specific_hyper(acquisition_function, m, sample_size_N, acq_grid, task_group, fast_update)
                     # this compute_acquisiton_function should be modified 
                     # because that function perform averaging process for all states of GP instance
                     # in this algorithm, we should average of acquisition functions from newly sampled hyperparameter
+                    
+                    
                     acq_opt_logs.append(task_acqs[group])
 
 
@@ -991,12 +989,14 @@ class DefaultChooser(object):
             #     Compute the variances of that estimator
             # v_bar^M_N can be computed using acq_opt_log[]["value"]
             # estimator of 'g' part is little bit complicated............number1 and number2 
+            #logging.info([dictionary["value"] for dictionary in acq_opt_logs])
 
 
             # x_hat should be chosen in acq_opt_logs by the performance of g_N_prime
             # using compute_acquisition_function, deleting if self.options["optimize_acq"] part
             # and parameter 'grid' gets the list of locations in 'acq_opt_logs'
             x_hat_cands = np.array([ dictionary["location"] for dictionary in acq_opt_logs ])
+            
             N_prime_acq_opt = dict()
             for group, task_group in task_groups.iteritems():
                 # %%%%%%%%%% should be modified %%%%%%%%
@@ -1013,7 +1013,9 @@ class DefaultChooser(object):
             # which have best performance in g_N_prime
 
             # this code should be modified for constrained version
+            #logging.info(N_prime_acq_opt)
             x_hat = N_prime_acq_opt[group]["location"]
+            
             #logging.info("x hat is %s"%str(x_hat))
             #logging.info("x_hat is %s"%str(np.array([x_hat])))
             # using N prime number of sample averaging .........
@@ -1041,7 +1043,13 @@ class DefaultChooser(object):
             optimality_gap = opt_gap_v1 if opt_gap_v1 < opt_gap_v2 else opt_gap_v2
 
             stopping_criteria = optimality_gap < np.abs(relative_gap_thres * est_v_star)
-
+            
+            # logging.info("optimality gap is %s"%str(optimality_gap))
+            # logging.info("g_N_prime_at_x_hat is %s"%str(g_N_prime_at_x_hat))
+            # logging.info("g_bar_N_M_at_x_hat is %s"%str(g_bar_N_M_at_x_hat))
+            # logging.info("est v star is %s"%str(est_v_star))
+            # logging.info("threshold value is %s"%str(np.abs(relative_gap_thres * est_v_star)))
+            # logging.info(" ")
             if(stopping_criteria):
                 # break the while loop
                 break
@@ -1063,10 +1071,10 @@ class DefaultChooser(object):
             # in 'acquisition' method, there is code which returns existing acq_values 
 
             for task_name, task in self.tasks.iteritems():
-                self.models[task_name_key]._cache_list = []
-                self.models[task_name_key]._hypers_list = []
-                self.models[task_name_key].state = None
-                self.models[task_name_key].num_states = 0
+                self.models[task_name]._cache_list = []
+                self.models[task_name]._hypers_list = []
+                self.models[task_name].state = None
+                self.models[task_name].num_states = 0
 
 
             # so just fitting the new GP model with newly sampled hyperparameters
@@ -1187,6 +1195,7 @@ class DefaultChooser(object):
         return suggested_location, suggested_tasks
 
 
+
     def compute_acquisition_function(self, acquisition_function, grid, tasks, fast_update):
 
         logging.info("Computing %s on grid for %s." % (self.acquisition_function_name, ', '.join(tasks)))
@@ -1226,7 +1235,7 @@ class DefaultChooser(object):
                 alg = self.nlopt_method if has_grads else self.nlopt_method_derivative_free
                 opt = nlopt.opt(alg, self.num_dims)
 
-                logging.info('Optimizing %s with NLopt, %s' % (self.acquisition_function_name, opt.get_algorithm_name()))
+                #logging.info('Optimizing %s with NLopt, %s' % (self.acquisition_function_name, opt.get_algorithm_name()))
                 
                 opt.set_lower_bounds(0.0)
                 opt.set_upper_bounds(1.0)
@@ -1267,7 +1276,7 @@ class DefaultChooser(object):
 
             else: # use bfgs
                 # see http://docs.scipy.org/doc/scipy-0.14.0/reference/generated/scipy.optimize.fmin_l_bfgs_b.html
-                logging.info('Optimizing %s with L-BFGS%s' % (self.acquisition_function_name, '' if has_grads else ' (numerically estimating gradients)'))
+                #logging.info('Optimizing %s with L-BFGS%s' % (self.acquisition_function_name, '' if has_grads else ' (numerically estimating gradients)'))
 
                 if has_grads:
                     def f(x):
@@ -1330,6 +1339,7 @@ class DefaultChooser(object):
         grid_acq = avg_hypers(self.models.values(), acquisition_function, num_subset,
                                         grid, compute_grad=False, tasks=tasks)
 
+        
         # The index and value of the top grid point
         best_acq_ind = np.argmax(grid_acq)
         best_acq_location = grid[best_acq_ind]
@@ -1376,7 +1386,7 @@ class DefaultChooser(object):
                 alg = self.nlopt_method if has_grads else self.nlopt_method_derivative_free
                 opt = nlopt.opt(alg, self.num_dims)
 
-                logging.info('Optimizing %s with NLopt, %s' % (self.acquisition_function_name, opt.get_algorithm_name()))
+                #logging.info('Optimizing %s with NLopt, %s' % (self.acquisition_function_name, opt.get_algorithm_name()))
                 
                 opt.set_lower_bounds(0.0)
                 opt.set_upper_bounds(1.0)
@@ -1417,7 +1427,7 @@ class DefaultChooser(object):
 
             else: # use bfgs
                 # see http://docs.scipy.org/doc/scipy-0.14.0/reference/generated/scipy.optimize.fmin_l_bfgs_b.html
-                logging.info('Optimizing %s with L-BFGS%s' % (self.acquisition_function_name, '' if has_grads else ' (numerically estimating gradients)'))
+                #logging.info('Optimizing %s with L-BFGS%s' % (self.acquisition_function_name, '' if has_grads else ' (numerically estimating gradients)'))
 
                 if has_grads:
                     def f(x):
@@ -1460,9 +1470,10 @@ class DefaultChooser(object):
 
         return {"location" : best_acq_location, "value" : best_acq_value}
 
+
     def compute_acquisition_function_for_specific_hyper(self, acquisition_function, round_num, newly_sampled_num, grid, tasks, fast_update):
 
-        logging.info("Computing %s on grid for %s." % (self.acquisition_function_name, ', '.join(tasks)))
+        #logging.info("Computing %s on grid for %s." % (self.acquisition_function_name, ', '.join(tasks)))
 
 
         # Special case -- later generalize this to more complicated cases
@@ -1487,6 +1498,7 @@ class DefaultChooser(object):
 
         has_grads = self.acquisition_function_instance.has_gradients
 
+        #if False:
         if self.options['optimize_acq']:
 
             if self.options['check_grad']:
@@ -1499,7 +1511,7 @@ class DefaultChooser(object):
                 alg = self.nlopt_method if has_grads else self.nlopt_method_derivative_free
                 opt = nlopt.opt(alg, self.num_dims)
 
-                logging.info('Optimizing %s with NLopt, %s' % (self.acquisition_function_name, opt.get_algorithm_name()))
+                #logging.info('Optimizing %s with NLopt, %s' % (self.acquisition_function_name, opt.get_algorithm_name()))
                 
                 opt.set_lower_bounds(0.0)
                 opt.set_upper_bounds(1.0)
@@ -1540,7 +1552,7 @@ class DefaultChooser(object):
 
             else: # use bfgs
                 # see http://docs.scipy.org/doc/scipy-0.14.0/reference/generated/scipy.optimize.fmin_l_bfgs_b.html
-                logging.info('Optimizing %s with L-BFGS%s' % (self.acquisition_function_name, '' if has_grads else ' (numerically estimating gradients)'))
+                #logging.info('Optimizing %s with L-BFGS%s' % (self.acquisition_function_name, '' if has_grads else ' (numerically estimating gradients)'))
 
                 if has_grads:
                     def f(x):
@@ -1710,6 +1722,7 @@ class DefaultChooser(object):
         # Compute the GP mean
         obj_mean, obj_var = obj_model.function_over_hypers(obj_model.predict, grid)
 
+        
         # find the min and argmin of the GP mean
         current_best_location = grid[np.argmin(obj_mean),:]
         best_ind = np.argmin(obj_mean)
