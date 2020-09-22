@@ -116,7 +116,7 @@
 
         N_increasing_num = 1 # increasing Rule of N,N'
 
-        z_alpha = 
+        #z_alpha = 
 
         round_num = 0
 
