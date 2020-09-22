@@ -112,7 +112,7 @@
         replication_M = 25
         sample_size_N_prime = int(replication_M * sample_size_N * 0.8)
 
-        relative_gap_thres = 0.15  # this variable is needed??
+        relative_gap_thres = 0.20  # this variable is needed??
 
         N_increasing_num = 1 # increasing Rule of N,N'
 
@@ -514,12 +514,13 @@
                 # using x_hat_candidates.......not the best in current best 
                 for point in x_hat_cands:
                     cur_x_opt = opt.optimize(point.copy())
-
+                    logging.info("initialization for %s has been done"%str(point))
                     cur_returncode = opt.last_optimize_result()
 
                     cur_y_opt = f(cur_x_opt, np.array([]))
 
                     opt_result_points.append(cur_x_opt)
+                    logging.info("opt algo result is %s"%str(cur_x_opt))
 
                     if((cur_returncode > 0 or cur_returncode == -4) and cur_y_opt > best_grid_acq_value):
                         best_acq_locations.append(cur_x_opt)
