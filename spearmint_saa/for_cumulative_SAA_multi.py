@@ -1,3 +1,6 @@
+    # variance of the optimality gap should be added in the optimimality gap
+    
+    
     # 20.09.22.
     # modified SAA, using cumulative hyperparameter samples......
     # cumulative SAA + multistart, PSO
