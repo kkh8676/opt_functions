@@ -1,0 +1,22 @@
+{
+    "language"        : "PYTHON",
+    "main_file"       : "schaffer_N2.py",
+    "experiment-name" : "schaffer_N2",
+    "likelihood"      : "NOISELESS",
+    "acquisition"     : "PES",
+    "variables" : {
+        "x" : {
+            "type" : "FLOAT",
+            "size" : 1,
+            "min"  : -10,
+            "max"  : 10
+        },
+        "y" : {
+            "type" : "FLOAT",
+            "size" : 1,
+            "min"  : -10,
+            "max"  : 15
+        }
+    }
+}
+
