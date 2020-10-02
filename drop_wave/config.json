@@ -1,0 +1,22 @@
+{
+    "language"        : "PYTHON",
+    "main_file"       : "drop_wave.py",
+    "experiment-name" : "drop_wave",
+    "likelihood"      : "NOISELESS",
+    "acquisition"     : "PES",
+    "variables" : {
+        "x" : {
+            "type" : "FLOAT",
+            "size" : 1,
+            "min"  : -5.12,
+            "max"  : 5.12
+        },
+        "y" : {
+            "type" : "FLOAT",
+            "size" : 1,
+            "min"  : -5.12,
+            "max"  : 5.12
+        }
+    }
+}
+
