@@ -22,7 +22,10 @@ def boston_housing_r2(epoch_num, learn_rate):
 
 	# Boston housing is a dictionary based dataset
 	boston_df = pd.DataFrame(boston['data'])
+	boston_df.columns = boston["feature_names"]
 
+	boston_df["PRICE"] = boston["target"]
+	
 	# Define the y data
 	y = boston_df["PRICE"]
 
@@ -63,7 +66,7 @@ def boston_housing_r2(epoch_num, learn_rate):
 
 
 	# Training the model!!
-
+	print("Training the network!!")
 	for epoch in range(num_epochs):
 		# Shuffle just mixes up the dataset between epochs
 		X_train, y_train = shuffle(X_train, y_train)
@@ -86,7 +89,7 @@ def boston_housing_r2(epoch_num, learn_rate):
 			optimizer.step()
 
 			running_loss += loss.item()
-
+		if(epoch % 100 == 0) print('Epoch {}'.format(epoch+1), "loss: ",running_loss)
 		running_loss = 0.0
 	# for loop end
 
