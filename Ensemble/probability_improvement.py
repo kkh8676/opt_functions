@@ -202,7 +202,7 @@ def compute_pi(model, pred, xi=0, pi_target=None, compute_grad=True):
 
 	# Probability of Improvement
 	sigma = np.sqrt(var)
-	z     = (pi_target - mean - xi) / sigma
+	z     = (pi_target - mean) / sigma
 	ncdf  = sps.norm.cdf(z)
 	npdf  = sps.norm.pdf(z)
 
@@ -251,7 +251,7 @@ def compute_pi_pending(model, pred, xi=0, pi_target=None, compute_grad=True):
 
 	# Probability of Improvement
 	func_s = np.sqrt(func_v)
-	u      = (ei_values - func_m - xi) / func_s
+	u      = (ei_values - func_m) / func_s
 	ncdf   = sps.norm.cdf(u)
 	npdf   = sps.norm.pdf(u)
 	pi     = np.mean(ncdf, axis=1)
