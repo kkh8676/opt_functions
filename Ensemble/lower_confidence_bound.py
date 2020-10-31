@@ -266,15 +266,13 @@ def lcb_evaluate_constraint_only(obj_model, constraint_models, cand, current_bes
 	return
 
 
-class LowConfidenceBound(AbstractAcquisitionFunction):
+class LowerConfidenceBound(AbstractAcquisitionFunction):
 	""" This is regular Low Confidence Bound when there are no constraints,
 	    and the constraint-weighted Lo,,,,,,,, when there are constraints. """
-
-    def create_acquisition_function(self, objective_model_dict, constraint_models_dict, current_best, **kwargs):
-
-        objective_model = objective_model_dict.values()[0]
-        if len(constraint_models_dict) == 0:
-            return lambda cand, compute_grad, **kwargs: compute_lcb(objective_model, cand, 
-                ei_target=current_best, compute_grad=compute_grad)
-        else:
-            return lambda cand, compute_grad, **kwargs: constraint_weighted_lcb(objective_model, constraint_models_dict.values(), cand, current_best, compute_grad)	   	
+	def create_acquisition_function(self, objective_model_dict, constraint_models_dict, current_best, **kwargs):
+	    	objective_model = objective_model_dict.values()[0]
+	    	if len(constraint_models_dict) == 0:
+	    		return lambda cand, compute_grad, **kwargs: compute_lcb(objective_model, cand,
+	    			ei_target=current_best, compute_grad=compute_grad)
+	    	else:
+	    		return lambda cand, compute_grad, **kwargs: constraint_weighted_lcb(objective_model, constraint_models_dict.values(), cand, current_best, compute_grad)	   	
