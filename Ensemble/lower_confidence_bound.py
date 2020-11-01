@@ -211,7 +211,7 @@ def compute_lcb(model, pred, ei_target=None, compute_grad=True, nu=0.2):
 	lcb      = mean - np.sqrt(nu * beta) * sigma 
 
 	if not compute_grad:
-		return lcb
+		return lcb * (-1)
 
 
 	# Gradients of lcb w.r.t. mean and variance.....
@@ -221,7 +221,7 @@ def compute_lcb(model, pred, ei_target=None, compute_grad=True, nu=0.2):
 	# Gradients of lcb w.r.t the inputs
 	grad_lcb_x = grad_mean_x * g_lcb_m + grad_var_x * g_lcb_s2
 
-	return lcb, grad_lcb_x
+	return lcb* (-1), grad_lcb_x* (-1)
 
 
 def compute_lcb_pending(model, pred, ei_target=None, compute_grad=True):
@@ -269,10 +269,11 @@ def lcb_evaluate_constraint_only(obj_model, constraint_models, cand, current_bes
 class LowerConfidenceBound(AbstractAcquisitionFunction):
 	""" This is regular Low Confidence Bound when there are no constraints,
 	    and the constraint-weighted Lo,,,,,,,, when there are constraints. """
+
 	def create_acquisition_function(self, objective_model_dict, constraint_models_dict, current_best, **kwargs):
 	    	objective_model = objective_model_dict.values()[0]
 	    	if len(constraint_models_dict) == 0:
-	    		return lambda cand, compute_grad, **kwargs: compute_lcb(objective_model, cand,
+	    		return lambda cand, compute_grad, **kwargs: compute_lcb(objective_model, cand, 
 	    			ei_target=current_best, compute_grad=compute_grad)
 	    	else:
 	    		return lambda cand, compute_grad, **kwargs: constraint_weighted_lcb(objective_model, constraint_models_dict.values(), cand, current_best, compute_grad)	   	
