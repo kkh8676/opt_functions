@@ -793,7 +793,8 @@ class DefaultChooser(object):
 
         eta = 1
         for acq_name in self.returned_cand_list.keys():
-            obj_mean, obj_var = obj_model.function_over_hypers(obj_model.predict, self.returned_cand_list[acq_name]["location"])
+            logging.info(self.returned_cand_list[acq_name]["location"])
+            obj_mean, obj_var = obj_model.function_over_hypers(obj_model.predict, np.array([self.returned_cand_list[acq_name]["location"]]))
 
         # current gain + new gain process & calculate that probability
 
