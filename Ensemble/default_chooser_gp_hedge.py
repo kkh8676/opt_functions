@@ -261,9 +261,13 @@ class DefaultChooser(object):
             self.nlopt_method                 = getattr(nlopt, self.options['nlopt_method_has_grad'])
             self.nlopt_method_derivative_free = getattr(nlopt, self.options['nlopt_method_no_grad'])
 
-        self.gains = defaultdict(dict)
-        self.acq_prob = [1.0/3, 1.0/3, 1.0/3]
+        self.gains = defaultdict(lambda : 0)
+        self.cumulative_gains = defaultdict(lambda : 0)
+        
         self.acquisition_function_name_list = ["ExpectedImprovement","ProbabilityImprovement","LowerConfidenceBound"]
+        self.acq_prob = [1.0/len(self.acquisition_function_name_list) for i in range(len(self.acquisition_function_name_list))]
+
+        self.returned_cand_list = defaultdict(dict)
 
         # The tolerance for NLOPT in optimizaing things. if the tolerance is specified
         # in the original units, used that
@@ -740,15 +744,15 @@ class DefaultChooser(object):
         # Initializing / Creating the acquisition function process
         # If wanna use GP Hedge, should mofify this process!!
         
-        returned_cand_list = []
+        
 
         task_groups = defaultdict(list)
         for task_name, group in task_couplings.iteritems():
             task_groups[group].append(task_name)
 
         # Select Randomly for previous probability
-        selected_index = np.random.choice(3,1, p =self.acq_prob)[0]
-        logging.info("You selected %s"%str(self.acquisition_function_name_list[selected_index]))
+        selected_acq_name = np.random.choice(self.acquisition_function_name_list,1, p =self.acq_prob)[0]
+        logging.info("You selected %s"%selected_acq_name)
 
         # 4 way standard versions........
         for acq_name in self.acquisition_function_name_list:
@@ -767,7 +771,7 @@ class DefaultChooser(object):
 
             task_acqs = dict()
             for group, task_group in task_groups.iteritems():
-                returned_cand_list.append(self.compute_acquisition_function(acquisition_function, acq_grid, task_group, fast_update))
+                self.returned_cand_list[acq_name] = self.compute_acquisition_function(acquisition_function, acq_grid, task_group, fast_update)
             # I think returned_cand_list has 4 element!!
 
 
@@ -779,12 +783,17 @@ class DefaultChooser(object):
         task_acqs = dict()
         for group, task_group in task_groups.iteritems():
             ######################### returned_cand_list[selected_index]
-            task_acqs[group] = returned_cand_list[selected_index]
+            task_acqs[group] = self.returned_cand_list[selected_acq_name]
 
 
         # update Gain process
         # How can i save the each gains??????
         # self.gains ++
+        obj_model = self.obj_model
+
+        eta = 1
+        for acq_name in self.returned_cand_list.keys():
+            obj_mean, obj_var = obj_model.function_over_hypers(obj_model.predict, self.returned_cand_list[acq_name]["location"])
 
         # current gain + new gain process & calculate that probability
 
