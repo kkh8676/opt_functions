@@ -793,8 +793,8 @@ class DefaultChooser(object):
 
         eta = 1
         for acq_name in self.returned_cand_list.keys():
-            logging.info(self.returned_cand_list[acq_name]["location"])
             obj_mean, obj_var = obj_model.function_over_hypers(obj_model.predict, np.array([self.returned_cand_list[acq_name]["location"]]))
+            self.cumulative_gains[acq_name] = self.cumulative_gains[acq_name] + np.exp(eta * obj_mean)
 
         # current gain + new gain process & calculate that probability
 
@@ -941,8 +941,8 @@ class DefaultChooser(object):
         # stored_acq_list = []
         iter_num = len(self.objective_model_dict.values()[0].inputs)
         # for i in range(len(acq_keys)):
-        # 	cur_acq = self.acquisition_function_instance.stored_acq[acq_keys[i]]["Objective"]
-        # 	stored_acq_list.append(cur_acq)
+        #   cur_acq = self.acquisition_function_instance.stored_acq[acq_keys[i]]["Objective"]
+        #   stored_acq_list.append(cur_acq)
 
         # saving acq_grid
         # saving grid
@@ -1108,7 +1108,7 @@ class DefaultChooser(object):
 
             if nlopt_imported:
 
-            	logging.info("multistart going!!")
+                logging.info("multistart going!!")
                 # select and specify algorithm
                 alg = self.nlopt_method if has_grads else self.nlopt_method_derivative_free
 
@@ -1168,7 +1168,7 @@ class DefaultChooser(object):
                     best_acq_value = np.max(best_acq_values)
                     best_acq_location = best_acq_locations[np.argmax(best_acq_values)]
                 else:
-                	best_acq_value = best_grid_acq_value
+                    best_acq_value = best_grid_acq_value
 
 
                 # x_opt = opt.optimize(best_acq_location.copy())
