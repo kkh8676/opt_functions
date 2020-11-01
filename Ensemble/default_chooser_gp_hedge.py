@@ -198,6 +198,7 @@ from spearmint.utils.grad_check      import check_grad
 from spearmint.utils.nlopt           import print_nlopt_returncode
 from spearmint.grids                 import sobol_grid
 from spearmint.models.abstract_model import function_over_hypers
+from spearmint.models.abstract_model import function_over_hypers_list
 from spearmint.models.abstract_model import function_over_hypers_single
 from spearmint.models.gp             import GP
 from spearmint                       import models
@@ -261,7 +262,8 @@ class DefaultChooser(object):
             self.nlopt_method_derivative_free = getattr(nlopt, self.options['nlopt_method_no_grad'])
 
         self.gains = defaultdict(dict)
-        self.acquisition_function_name_list = ["ExpectedImprovement","ProbabilityImprovement","LowerConfidenceBound","PES"]
+        self.acq_prob = [1.0/3, 1.0/3, 1.0/3]
+        self.acquisition_function_name_list = ["ExpectedImprovement","ProbabilityImprovement","LowerConfidenceBound"]
 
         # The tolerance for NLOPT in optimizaing things. if the tolerance is specified
         # in the original units, used that
@@ -288,9 +290,7 @@ class DefaultChooser(object):
         # Reset these if you are refitting. The reason is that in suggest(), to save time,
         # it checks if there is anything stored here in case best() was already
         # called explicity. So, we need to make sure best is called again if needed!
-        
-        # task means coupled set i think.....
-        # task = objective + constraints? just?
+
         for task_name, task in tasks.iteritems():
             if task.type.lower() == 'objective':
                 self.objective = task
@@ -298,22 +298,19 @@ class DefaultChooser(object):
                 self.constraints[task_name] = task
             else:
                 raise Exception('Unknown task type.')
-        
-        # Getting "fit" function parameter hypers
-        # if it is not given, just assign a defaultdict for it
+
         hypers = hypers if hypers is not None else defaultdict(dict)
 
         # Find the total number of samples across tasks, and do not fit if less than self.options['initial design size']
         self.total_inputs = reduce(lambda x,y:x+y,map(lambda t: t._inputs.shape[0], self.tasks.values()), 0)
         if self.total_inputs < self.options['initial_design_size']:
+            
             return hypers
 
 
         # FAST/SLOW updates
         fit_hypers = True
-        
-        # fast update version
-        # No need to understand..........
+
         if self.options['fast_updates']:
             # if elapsed time since last slow update < duration OF last slow update, do fast update
             elapsed_time_since_last_slow_update = time.time() - self.end_time_of_last_slow_update
@@ -329,8 +326,7 @@ class DefaultChooser(object):
                 self.start_time_of_last_slow_update = time.time()
         else:
             self.start_time_of_last_slow_update = time.time() # for scale-duration
-        
-        # fitting each objective and constraint
+
         for task_name, task in tasks.iteritems():
             inputs  = task.valid_normalized_inputs(self.input_space)
 
@@ -347,7 +343,6 @@ class DefaultChooser(object):
             # print pending
 
             # Always want to fit all tasks, even if there is no data
-            # Maybe model_class_name is assigned by "GP"
             model_class_name = task.options['model']
 
 
@@ -358,8 +353,6 @@ class DefaultChooser(object):
                 # we the number of dimensions of the model is actually smaller....
                 model_num_dims = task.options.get('subset num dims', self.num_dims)
 
-                # making model instance here
-                # GP model maybe......
                 self.models[task_name] = getattr(models, model_class_name)(model_num_dims, **task.options)
 
                 logging.debug('')
@@ -382,7 +375,6 @@ class DefaultChooser(object):
                     pass
                 else:
                     logging.debug('Adding pending samples to %s for %s task' % (model_class_name, task_name)) # debug only
-                    # Fitting the model hyperparameter here.........
                     self.models[task_name].fit(inputs, values, pending=pending, fit_hypers=False)
 
                 # hypers are unchanged
@@ -445,7 +437,7 @@ class DefaultChooser(object):
         # TODO: may want to take the intersection here, to not re-add points from different tasks
         # use a random seed for the grid. but don't let it get too large or it will
         # be slow to generate. pick between 0 and grid size, so it only takes 2x time
-        grid = sobol_grid.generate(self.num_dims, grid_size=grid_size, grid_seed=npr.randint(0, grid_size))
+        grid = sobol_grid.generate(self.num_dims, grid_size=grid_size, grid_seed=0)
         for task_name, task in self.tasks.iteritems():
             if task.has_valid_inputs():
                 grid = np.append(grid, self.input_space.to_unit(task.valid_inputs), axis=0)
@@ -498,7 +490,8 @@ class DefaultChooser(object):
             total_pending = sum(map(lambda t: t.pending.shape[0], self.tasks.values()))
             # i use pending as the grid seed so that you don't suggest the same thing over and over
             # when you have multiple cores -- cool. this was probably weird on the 3 core thing
-            suggestion = sobol_grid.generate(self.num_dims, grid_size=100, grid_seed=total_pending)[0]
+            #suggestion = sobol_grid.generate(self.num_dims, grid_size=100, grid_seed=total_pending)[0]
+            suggestion = np.random.rand(self.num_dims)
             # above: for some reason you can't generate a grid of size 1. heh.
 
             suggestion = self.input_space.from_unit(suggestion) # convert to original space
@@ -510,9 +503,12 @@ class DefaultChooser(object):
                 # normally it doesn't really matter, but in the decoupled case
                 # with PESC in particlar, if there are no objective data it skips
                 # the EP and gets all messed up
+
                 return suggestion, [self.objective.name]
                 # return suggestion, [random.choice(task_names)]
             else:  # if not decoupled. this is a bit of a hack but w/e
+                
+                
                 return suggestion, task_names
 
         fast_update = False
@@ -524,7 +520,7 @@ class DefaultChooser(object):
 
         # Compute the current best if it hasn't already been computed by the caller
         # and we want to make recommendations at every iteration
-        if not self.best_computed and self.options['recommendations'] == "during":
+        if not self.best_computed and self.options['recommendations'] == "during" and (self.options["acquisition"]=="ExpectedImprovement" or self.options["acquisition"]=="ProbabilityImprovement"):
             self.best() # sets self.stored_recommendation
         # only need to do this because EI uses current_best_value --
         # otherwise could run the whole thing without making recommendations at each iteration
@@ -559,18 +555,20 @@ class DefaultChooser(object):
         # note: PESC could just return
         # the dict for tasks and the summing could happen out here, but that's ok
         # since not all acquisition functions might be able to do that
-
-        # compute_acquisition_function refers above 'acquisition function' (one instance)
-        # and 
-        # deal with hyperparameters with function_over_hypers 
-        # compute_acquisition_function returns dictionary which constains the information of 
-        # best_acq_location and best_
+        # task_group??
         task_acqs = dict()
+        
         for group, task_group in task_groups.iteritems():
+            
+            
             task_acqs[group] = self.compute_acquisition_function(acquisition_function, acq_grid, task_group, fast_update)
         # Now task_acqs is a dict, with keys being the arbitrary group index, and the values
         # being a dict with keys "location" and "value"
+        
 
+        # do compute_acquisition_function until the SAA algorithm stopping creteria is satisfied
+        
+        
 
         # normalize things by the costs
         group_costs = dict()
@@ -665,8 +663,6 @@ class DefaultChooser(object):
         suggested_location[suggested_location > 1] = 1.0
         suggested_location[suggested_location < 0] = 0.0
 
-
-        # from unit domain to original domain
         suggested_location = self.input_space.from_unit(suggested_location)
 
         logging.info("\nSuggestion: task(s) %s at location" % ",".join(suggested_tasks))
@@ -699,7 +695,7 @@ class DefaultChooser(object):
         ## which means that total_inputs size is smaller than initial design size
         if self.total_inputs < self.options["initial_design_size"]:
 
-            total_pending = sum(map(lambda t: t.pending.shape[0], self.task.values()))
+            total_pending = sum(map(lambda t: t.pending.shape[0], self.tasks.values()))
 
             suggestion = sobol_grid.generate(self.num_dims, grid_size=100, grid_seed=total_pending)[0]
 
@@ -719,7 +715,7 @@ class DefaultChooser(object):
 
         # Fast update is for PESC only!!
         fast_update = False
-        if self.options['fast_update']:
+        if self.options['fast_updates']:
             fast_update = self.start_time_of_last_slow_update <= self.end_time_of_last_slow_update
             # this is False only if fit() set self.start_time_of_last_slow_update,
             # indicating that we in the process of a slow update. else do a fast update.
@@ -751,13 +747,14 @@ class DefaultChooser(object):
             task_groups[group].append(task_name)
 
         # Select Randomly for previous probability
-
+        selected_index = np.random.choice(3,1, p =self.acq_prob)[0]
+        logging.info("You selected %s"%str(self.acquisition_function_name_list[selected_index]))
 
         # 4 way standard versions........
         for acq_name in self.acquisition_function_name_list:
             self.acquisition_function_name = acq_name
             self.acquisition_function_class = getattr(acquisition_functions, self.acquisition_function_name)
-            self.acquisition_function_instance = self.acquisition_function_class(self.num_dims, input_space=input_space)
+            self.acquisition_function_instance = self.acquisition_function_class(self.num_dims, input_space=self.input_space)
 
             logging.info("Initializing %s" % self.acquisition_function_name)
             acquisition_function = self.acquisition_function_instance.create_acquisition_function(\
@@ -782,7 +779,7 @@ class DefaultChooser(object):
         task_acqs = dict()
         for group, task_group in task_groups.iteritems():
             ######################### returned_cand_list[selected_index]
-            task_acqs[group] = returned_cand_list[0]
+            task_acqs[group] = returned_cand_list[selected_index]
 
 
         # update Gain process
@@ -920,22 +917,29 @@ class DefaultChooser(object):
 
         # if we are doing a fast update, just use one of the hyperparameter samples
         # avg_hypers = function_over_hypers if not fast_update else function_over_hypers_single
+        avg_hypers_list = function_over_hypers_list
         avg_hypers = function_over_hypers
 
-        # Compute the acquisition function on the grid
-        # self.models.values() returns model instances...... GP models of objective and constraints
-        # by using avg_hypers averaging acquisition function values of each hyperparameter
-        # dealing state code is in the function_over_hypers function
-        grid_acq = avg_hypers(self.models.values(), acquisition_function,
+        # Compute the acquisition function
+        # Compute the acquisition function on the g on the grid
+        # self.models.values() returns the GP instance of objective and constraints
+        # returning acquisition function values of each hyperparameter's averaged version
+        grid_acq, stored_acq_list = avg_hypers_list(self.models.values(), acquisition_function,
                                         grid, compute_grad=False, tasks=tasks)
 
-        logging.info("Current iteration stored acq keys are default_choosers.py 703")
-        logging.info(sorted(self.acquisition_function_instance.stored_acq.keys()))
-        acq_keys = sorted(self.acquisition_function_instance.stored_acq.keys())
-        test_acq = self.acquisition_function_instance.stored_acq[acq_keys[0]]["Objective"]
-        for i in range(len(acq_keys)):
-            cur_acq = self.acquisition_function_instance.stored_acq[acq_keys[i]]["Objective"]
-            logging.info(len(cur_acq))
+        # acq_keys = sorted(self.acquisition_function_instance.stored_acq.keys())
+        # stored_acq_list = []
+        iter_num = len(self.objective_model_dict.values()[0].inputs)
+        # for i in range(len(acq_keys)):
+        # 	cur_acq = self.acquisition_function_instance.stored_acq[acq_keys[i]]["Objective"]
+        # 	stored_acq_list.append(cur_acq)
+
+        # saving acq_grid
+        # saving grid
+        # saving hyperparameters
+        np.save("grid_acq-%d.npy"%iter_num, stored_acq_list)
+        np.save("grid-%d.npy"%iter_num, grid)
+        np.save("hyperparameters-%d.npy"%iter_num, self.objective_model_dict.values()[0]._hypers_list)
 
         # The index and value of the top grid point
         best_acq_ind = np.argmax(grid_acq)
@@ -1039,6 +1043,187 @@ class DefaultChooser(object):
 
         return {"location" : best_acq_location, "value" : best_acq_value}
 
+    def compute_acquisition_function_multi(self, acquisition_function, grid, tasks, fast_update):
+
+        logging.info("Computing %s on grid for %s." % (self.acquisition_function_name, ', '.join(tasks)))
+
+
+        # Special case -- later generalize this to more complicated cases
+        # If there is only one task here, and it depends on only a subset of the parameters
+        # then let's do the optimization in lower dimensional space... right?
+        # i wonder though, will the acquisition function actually have 0 gradients in those
+        # directions...? maybe not. but they are irrelevant. but will they affect the optimization?
+        # hmm-- seems not worth the trouble here...
+
+        # if we are doing a fast update, just use one of the hyperparameter samples
+        # avg_hypers = function_over_hypers if not fast_update else function_over_hypers_single
+        avg_hypers = function_over_hypers
+
+        # Compute the acquisition function on the grid
+        # self.models.values() returns model instances...... GP models of objective and constraints
+        # by using avg_hypers averaging acquisition function values of each hyperparameter
+        # dealing state code is in the function_over_hypers function
+        grid_acq = avg_hypers(self.models.values(), acquisition_function,
+                                        grid, compute_grad=False, tasks=tasks)
+
+        
+        
+        acq_keys = sorted(self.acquisition_function_instance.stored_acq.keys())
+        test_acq = self.acquisition_function_instance.stored_acq[acq_keys[0]]["Objective"]
+        for i in range(len(acq_keys)):
+            cur_acq = self.acquisition_function_instance.stored_acq[acq_keys[i]]["Objective"]
+            
+
+        # The index and value of the top grid point
+        best_acq_ind = np.argmax(grid_acq)
+        best_acq_location = grid[best_acq_ind]
+        best_grid_acq_value  = np.max(grid_acq)
+
+        sorted_index = np.argsort(grid_acq)[::-1]
+
+        size_subset = 20
+
+        sorted_index_subset = sorted_index[:size_subset]
+        best_acq_location_subset = grid[sorted_index_subset]
+        logging.info(best_acq_location_subset)
+
+
+
+        has_grads = self.acquisition_function_instance.has_gradients
+
+        if self.options['optimize_acq']:
+            if self.options['check_grad']:
+                check_grad(lambda x: avg_hypers(self.models.values(), acquisition_function, 
+                    x, compute_grad=True), best_acq_location)
+
+            if nlopt_imported:
+
+            	logging.info("multistart going!!")
+                # select and specify algorithm
+                alg = self.nlopt_method if has_grads else self.nlopt_method_derivative_free
+
+                # specify optimizer
+                opt = nlopt.opt(alg, self.num_dims)
+
+                logging.info('Optimizing %s with NLopt, %s' % (self.acquisition_function_name, opt.get_algorithm_name()))
+                
+                opt.set_lower_bounds(0.0)
+                opt.set_upper_bounds(1.0)
+
+                # define the objective function
+                def f(x, put_gradient_here):
+                    if x.ndim == 1:
+                        x = x[None,:]
+
+                    if put_gradient_here.size > 0:
+                        a, a_grad = avg_hypers(self.models.values(), acquisition_function, 
+                                x, compute_grad=True, tasks=tasks)
+                        put_gradient_here[:] = a_grad.flatten()
+                    else:
+                        a = avg_hypers(self.models.values(), acquisition_function,
+                                x, compute_grad=False, tasks=tasks)
+
+                    return float(a)
+
+                # we're finding maximum
+                opt.set_max_objective(f)
+
+                # setting ε-optimal condition ε
+                opt.set_xtol_abs(self.options['fast_opt_acq_tol'] if fast_update else self.options['opt_acq_tol'])
+
+                # how many grids in the acq_grid_size??
+                opt.set_maxeval(self.options['fast_acq_grid_size'] if fast_update else self.options['acq_grid_size'])
+
+
+                opt_result_points = []
+                best_acq_locations = []
+                best_acq_values =[]
+                for point in best_acq_location_subset:
+                    cur_x_opt = opt.optimize(point.copy())
+
+                    logging.info("opt method over!")
+                    logging.info(cur_x_opt)
+
+                    cur_returncode = opt.last_optimize_result()
+
+                    cur_y_opt = f(cur_x_opt, np.array([]))
+
+                    opt_result_points.append(cur_x_opt)
+
+                    if((cur_returncode > 0 or cur_returncode == -4) and cur_y_opt > best_grid_acq_value):
+                        best_acq_locations.append(cur_x_opt)
+                        best_acq_values.append(cur_y_opt)
+
+                if(len(best_acq_locations) > 0):
+                    best_acq_value = np.max(best_acq_values)
+                    best_acq_location = best_acq_locations[np.argmax(best_acq_values)]
+                else:
+                	best_acq_value = best_grid_acq_value
+
+
+                # x_opt = opt.optimize(best_acq_location.copy())
+
+                # returncode = opt.last_optimize_result()
+                # # y_opt = opt.last_optimum_value()
+                # y_opt = f(x_opt, np.array([]))
+
+
+                # # overwrite the current best if optimization succeeded
+                # # if return code is positive, that means optimization is succesfully done
+                # # return code == -4 means roundoff error and that returns useful result....
+                # if (returncode > 0 or returncode==-4) and y_opt > best_grid_acq_value:
+                #     print_nlopt_returncode(returncode, logging.debug)
+
+                #     best_acq_location = x_opt
+                #     best_acq_value = y_opt
+                # else:
+                #     best_acq_value = best_grid_acq_value
+
+            else: # use bfgs
+                # see http://docs.scipy.org/doc/scipy-0.14.0/reference/generated/scipy.optimize.fmin_l_bfgs_b.html
+                logging.info('Optimizing %s with L-BFGS%s' % (self.acquisition_function_name, '' if has_grads else ' (numerically estimating gradients)'))
+
+                if has_grads:
+                    def f(x):
+                        if x.ndim == 1:
+                            x = x[None,:]
+                        a, a_grad = avg_hypers(self.models.values(), acquisition_function, 
+                                    x, compute_grad=True, tasks=tasks)
+                        return (-a.flatten(), -a_grad.flatten())
+                else:
+                    def f(x):
+                        if x.ndim == 1:
+                            x = x[None,:]
+
+                        a = avg_hypers(self.models.values(), acquisition_function, 
+                                    x, compute_grad=False, tasks=tasks)
+
+                        return -a.flatten()
+                
+                bounds = [(0,1)]*self.num_dims
+                x_opt, y_opt, opt_info = spo.fmin_l_bfgs_b(f, best_acq_location.copy(), 
+                    bounds=bounds, disp=0, approx_grad=not has_grads)
+                y_opt = -y_opt
+                # make sure bounds are respected
+                x_opt[x_opt > 1.0] = 1.0
+                x_opt[x_opt < 0.0] = 0.0
+
+
+                if y_opt > best_grid_acq_value:
+                    best_acq_location = x_opt
+                    best_acq_value = y_opt
+                else:
+                    best_acq_value = best_grid_acq_value
+
+            logging.debug('Best %s before optimization: %f' % (self.acquisition_function_name, best_grid_acq_value))
+            logging.debug('Best %s after  optimization: %f' % (self.acquisition_function_name, best_acq_value))
+
+        else:
+            # do not optimize the acqusition function
+            logging.debug('Best %s on grid: %f' % (self.acquisition_function_name, best_grid_acq_value))
+
+        return {"location" : best_acq_location, "value" : best_acq_value}
+
     @property
     def objective_model(self):
         return self.models[self.objective.name]    
@@ -1085,15 +1270,15 @@ class DefaultChooser(object):
         if self.total_inputs < self.options['initial_design_size']:
             # If there is not enough data, just return something random...
             random_rec = npr.rand(1,self.num_dims)
-
+            
+            
             # what is the point of this exactly? oh well
-            rec =  {'model_model_input' : self.input_space.from_unit(random_rec),
+            rec =  {'model_model_input' : self.input_space.from_unit(random_rec)[0],
                     'model_model_value' : None,
                     'obser_obser_input' : None,
                     'obser_obser_value' : None,
                     'obser_model_input' : None,
-                    'obser_model_value' : None,
-                    'num_states'        : None}
+                    'obser_model_value' : None}
 
         elif self.numConstraints() == 0:
             logging.info('Computing current best...')
@@ -1108,8 +1293,7 @@ class DefaultChooser(object):
                     'obser_obser_input' : loc_o,
                     'obser_obser_value' : val_o,
                     'obser_model_input' : loc_o,
-                    'obser_model_value' : val_o,
-                    'num_states'        : self.objective_model_dict.values()[0].num_states}
+                    'obser_model_value' : val_o}
 
         else:
             logging.info('Computing current best...')
