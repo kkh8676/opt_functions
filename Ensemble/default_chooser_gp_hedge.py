@@ -265,7 +265,7 @@ class DefaultChooser(object):
         self.cumulative_gains = defaultdict(lambda : 0)
         
         self.acquisition_function_name_list = ["ExpectedImprovement","ProbabilityImprovement","LowerConfidenceBound"]
-        self.acq_prob = [1.0/len(self.acquisition_function_name_list) for i in range(len(self.acquisition_function_name_list))]
+        self.acq_prob = defaultdict(lambda : 1.0 / len(self.acquisition_function_name_list))
 
         self.returned_cand_list = defaultdict(dict)
 
@@ -751,7 +751,7 @@ class DefaultChooser(object):
             task_groups[group].append(task_name)
 
         # Select Randomly for previous probability
-        selected_acq_name = np.random.choice(self.acquisition_function_name_list,1, p =self.acq_prob)[0]
+        selected_acq_name = np.random.choice(self.acquisition_function_name_list, 1, p =[self.acq_prob[acq_name] for acq_name in self.acquisition_function_name_list])[0]
         logging.info("You selected %s"%selected_acq_name)
 
         # 4 way standard versions........
@@ -797,6 +797,10 @@ class DefaultChooser(object):
             self.cumulative_gains[acq_name] = self.cumulative_gains[acq_name] + np.exp(eta * obj_mean)
 
         # current gain + new gain process & calculate that probability
+        total_gain = np.sum([self.cumulative_gains[acq_name] for acq_name in self.acquisition_function_name_list])
+        for acq_name in self.acquisition_function_name_list:
+            self.acq_prob[acq_name] = self.cumulative_gains[acq_name] / total_gain
+        
 
 
         # normalize things by the costs
