@@ -750,6 +750,24 @@ class DefaultChooser(object):
         for task_name, group in task_couplings.iteritems():
             task_groups[group].append(task_name)
 
+
+        # update Gain process if there is returned_cand_list......
+        # How can i save the each gains??????
+        # self.gains ++
+        if len(test_dict.keys() > 0):
+            obj_model = self.obj_model
+
+            eta = 1
+
+            for acq_name in self.returned_cand_list.keys():
+                obj_mean, obj_var = obj_model.function_over_hypers(obj_model.predict, np.array([self.returned_cand_list[acq_name]["location"]]))
+                self.cumulative_gains[acq_name] = self.cumulative_gains[acq_name] + np.exp(eta * obj_mean[0] * (-1))
+
+            # Current gain + new gain process & calculate that probability
+            total_gain = np.sum([self.cumulative_gains[acq_name] for acq_name in self.acquisition_function_name_list])
+            for acq_name in self.acquisition_function_name_list:
+                self.acq_prob[acq_name] = self.cumulative_gains[acq_name] / total_gain
+        
         # Select Randomly for previous probability
         logging.info([self.acq_prob[acq_name] for acq_name in self.acquisition_function_name_list])
         logging.info(self.acq_prob)
@@ -788,23 +806,20 @@ class DefaultChooser(object):
         for group, task_group in task_groups.iteritems():
             ######################### returned_cand_list[selected_index]
             task_acqs[group] = self.returned_cand_list[selected_acq_name]
+            
 
+        # obj_model = self.obj_model
 
-        # update Gain process
-        # How can i save the each gains??????
-        # self.gains ++
-        obj_model = self.obj_model
+        # eta = 1
+        # for acq_name in self.returned_cand_list.keys():
+        #     obj_mean, obj_var = obj_model.function_over_hypers(obj_model.predict, np.array([self.returned_cand_list[acq_name]["location"]]))
+        #     self.cumulative_gains[acq_name] = self.cumulative_gains[acq_name] + np.exp(eta * obj_mean[0] * (-1))
 
-        eta = 1
-        for acq_name in self.returned_cand_list.keys():
-            obj_mean, obj_var = obj_model.function_over_hypers(obj_model.predict, np.array([self.returned_cand_list[acq_name]["location"]]))
-            self.cumulative_gains[acq_name] = self.cumulative_gains[acq_name] + np.exp(eta * obj_mean[0] * (-1))
+        # # current gain + new gain process & calculate that probability
+        # total_gain = np.sum([self.cumulative_gains[acq_name] for acq_name in self.acquisition_function_name_list])
+        # for acq_name in self.acquisition_function_name_list:
+        #     self.acq_prob[acq_name] = self.cumulative_gains[acq_name] / total_gain
 
-        # current gain + new gain process & calculate that probability
-        total_gain = np.sum([self.cumulative_gains[acq_name] for acq_name in self.acquisition_function_name_list])
-        for acq_name in self.acquisition_function_name_list:
-            self.acq_prob[acq_name] = self.cumulative_gains[acq_name] / total_gain
-        
 
 
         # normalize things by the costs
