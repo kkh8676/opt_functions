@@ -264,7 +264,8 @@ class DefaultChooser(object):
         self.gains = defaultdict(lambda : 0)
         self.cumulative_gains = defaultdict(lambda : 0)
         
-        self.acquisition_function_name_list = ["ExpectedImprovement","ProbabilityImprovement","LowerConfidenceBound","PES"]
+        #self.acquisition_function_name_list = ["ExpectedImprovement","ProbabilityImprovement","LowerConfidenceBound","PES"]
+        self.acquisition_function_name_list = ["ExpectedImprovement","ProbabilityImprovement","LowerConfidenceBound"]
         self.acq_prob = defaultdict(lambda : 1.0 / len(self.acquisition_function_name_list))
 
         self.returned_cand_list = defaultdict(dict)
@@ -754,7 +755,7 @@ class DefaultChooser(object):
         # update Gain process if there is returned_cand_list......
         # How can i save the each gains??????
         # self.gains ++
-        if len(test_dict.keys() > 0):
+        if len(self.returned_cand_list.keys()) > 0:
             obj_model = self.obj_model
 
             eta = 1
@@ -767,6 +768,8 @@ class DefaultChooser(object):
             total_gain = np.sum([self.cumulative_gains[acq_name] for acq_name in self.acquisition_function_name_list])
             for acq_name in self.acquisition_function_name_list:
                 self.acq_prob[acq_name] = self.cumulative_gains[acq_name] / total_gain
+
+            logging.info("Cumulative Gain is updated!")
         
         # Select Randomly for previous probability
         logging.info([self.acq_prob[acq_name] for acq_name in self.acquisition_function_name_list])
