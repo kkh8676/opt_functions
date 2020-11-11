@@ -1,0 +1,17 @@
+{
+    "language"        : "PYTHON",
+    "main_file"       : "test.py",
+    "experiment-name" : "test",
+    "likelihood"      : "NOISELESS",
+    "acquisition"     : "PES",
+    "variables" : {
+        "x1" : {
+            "type" : "FLOAT",
+            "size" : 1,
+            "min"  : -5.12,
+            "max"  : 5.12
+        }
+        
+    }
+}
+
