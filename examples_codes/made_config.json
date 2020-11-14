@@ -1,0 +1,21 @@
+{
+    "language"        : "PYTHON",
+    "main_file"       : "made.py",
+    "experiment-name" : "made_small_lengthscale_EI_ver2",
+    "likelihood"      : "NOISELESS",
+    "acquisition"     : "EI",
+    "initial design size" : 3,
+    "mcmc_iters" : 0,
+    "pes_num_x*_samples" : 50,
+    "max_finished_jobs" : 100,
+    "variables" : {
+        "x1" : {
+            "type" : "FLOAT",
+            "size" : 1,
+            "min"  : -5.12,
+            "max"  : 5.12
+        }
+        
+    }
+}
+
